@@ -1,0 +1,741 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8">
+  <title>N2G — Quản lý dao cụ</title>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600&family=Inter:wght@300;400;500;600&display=swap');
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    :root {
+      --bg:#f5f5f7; --bg2:#ffffff; --bg3:#ededf0;
+      --border:#e2e2e6; --border2:#c8c8d0;
+      --surface:#ffffff; --surface2:#f5f5f7;
+      --accent:#2a9a4a; --accent-d:#1e7a38;
+      --text1:#1a1a20; --text2:#555560; --text3:#9999aa;
+      --danger:#d94040; --warn:#c07800;
+      --mono:'JetBrains Mono',monospace; --sans:'Inter',system-ui,sans-serif;
+      --r:8px;
+    }
+    body { background:var(--bg); color:var(--text1); font-family:var(--sans); font-size:12px; height:100vh; display:flex; flex-direction:column; overflow:hidden; }
+
+    /* Header */
+    header { padding:12px 18px; border-bottom:1px solid var(--border); display:flex; align-items:center; justify-content:space-between; flex-shrink:0; background:var(--bg2); }
+    .logo { width:26px;height:26px;background:var(--accent);border-radius:6px;display:flex;align-items:center;justify-content:center;font-family:var(--mono);font-weight:600;font-size:9px;color:#fff;margin-right:10px; }
+    .header-left { display:flex;align-items:center; }
+    .header-title { font-size:13px;font-weight:600;color:var(--text1); }
+    .header-sub { font-size:10px;color:var(--text3);margin-top:1px; }
+
+    /* Group selector bar */
+    #group-bar { padding:10px 18px; background:var(--bg2); border-bottom:1px solid var(--border); flex-shrink:0; display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
+    .group-label { font-size:9px;color:var(--text3);letter-spacing:1px;text-transform:uppercase;flex-shrink:0; }
+    .group-btn { padding:5px 14px;border:1px solid var(--border2);border-radius:20px;background:var(--bg3);color:var(--text2);font-size:11px;cursor:pointer;transition:all 0.15s;font-family:var(--sans); }
+    .group-btn:hover { border-color:var(--accent);color:var(--accent);background:#e8f5ec; }
+    .group-btn.active { border-color:var(--accent);background:#e8f5ec;color:var(--accent);font-weight:600; }
+    .group-info { font-size:10px;color:var(--text3);font-family:var(--mono); }
+
+    /* Toolbar */
+    .toolbar { padding:9px 18px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:7px;flex-shrink:0;background:var(--bg2); }
+    .tbtn { padding:5px 12px;border-radius:6px;border:1px solid var(--border2);font-size:11px;font-weight:500;cursor:pointer;font-family:var(--sans);transition:all 0.15s;display:inline-flex;align-items:center;gap:4px;background:var(--bg3);color:var(--text2); }
+    .tbtn:hover { border-color:var(--border2);background:var(--bg);color:var(--text1); }
+    .tbtn-primary { background:var(--accent);color:#fff;border-color:var(--accent); }
+    .tbtn-primary:hover { background:var(--accent-d);border-color:var(--accent-d);color:#fff; }
+    .tbtn-ghost { color:var(--danger);border-color:var(--border2); }
+    .tbtn-ghost:hover { border-color:var(--danger);background:#fef0f0;color:var(--danger); }
+    .tbtn-danger { background:#fff;color:var(--danger);border-color:var(--danger); }
+    .tbtn-danger:hover { background:var(--danger);color:#fff;border-color:var(--danger); }
+
+    /* Table */
+    .table-wrap { flex:1;overflow-y:auto;padding:0; }
+    table { width:100%;border-collapse:collapse; }
+    thead { position:sticky;top:0;z-index:10;background:var(--bg2); }
+    th { text-align:left;padding:9px 10px;font-size:9px;font-weight:600;color:var(--text3);letter-spacing:1.2px;text-transform:uppercase;border-bottom:1px solid var(--border);white-space:nowrap; }
+    td { padding:0;border-bottom:1px solid var(--border);vertical-align:middle; }
+    tr:last-child td { border-bottom:none; }
+    tr:hover td { background:#f0f7f2; }
+    tr.selected td { background:#e8f5ec; }
+
+    .cell-input { width:100%;background:transparent;border:none;border-bottom:1px solid transparent;color:var(--text1);font-family:var(--mono);font-size:11px;padding:9px 10px;outline:none;transition:all 0.15s; }
+    .cell-input:focus { border-bottom-color:var(--accent);background:#f0f7f2; }
+    .cell-tn { padding:9px 10px;font-family:var(--mono);font-size:11px;color:var(--accent);text-align:center;width:36px;user-select:none;font-weight:600; }
+
+    .del-btn { width:24px;height:24px;background:transparent;border:1px solid transparent;border-radius:5px;cursor:pointer;color:var(--text3);font-size:13px;display:inline-flex;align-items:center;justify-content:center;transition:all 0.15s;margin:6px 1px;vertical-align:middle; }
+    .del-btn:hover { border-color:var(--danger);color:var(--danger);background:#fef0f0; }
+    .dup-btn { width:24px;height:24px;background:transparent;border:1px solid transparent;border-radius:5px;cursor:pointer;color:var(--text3);display:inline-flex;align-items:center;justify-content:center;transition:all 0.15s;margin:6px 1px;vertical-align:middle; }
+    .dup-btn:hover { border-color:var(--accent,#2563a8);color:var(--accent,#2563a8);background:rgba(37,99,168,0.08); }
+
+    /* Footer */
+    footer { padding:8px 18px;border-top:1px solid var(--border);display:flex;align-items:center;gap:10px;flex-shrink:0;background:var(--bg2); }
+    #status-dot { width:6px;height:6px;border-radius:50%;background:var(--text3);flex-shrink:0; }
+    #status-dot.ok { background:var(--accent); }
+    #status-dot.saving { background:var(--warn);animation:blink 0.6s infinite; }
+    #status-dot.error { background:var(--danger); }
+    @keyframes blink { 0%,100%{opacity:1}50%{opacity:.3} }
+    #status-text { flex:1;font-size:10px;color:var(--text3);font-family:var(--mono); }
+    #tool-count { font-size:10px;color:var(--text3);font-family:var(--mono); }
+
+    ::-webkit-scrollbar { width:4px; }
+    ::-webkit-scrollbar-thumb { background:var(--border2);border-radius:10px; }
+
+    /* Custom input modal */
+    #input-modal { position:fixed;inset:0;z-index:200;display:none;align-items:center;justify-content:center;background:rgba(0,0,0,0.25);backdrop-filter:blur(2px); }
+    #input-modal.show { display:flex; }
+    /* Modal chỉnh sửa dao */
+    #tool-edit-modal { position:fixed;inset:0;z-index:220;display:none;align-items:center;justify-content:center;background:rgba(0,0,0,0.32);backdrop-filter:blur(3px); }
+    #tool-edit-modal.show { display:flex; }
+    #tool-edit-modal .te-box { background:var(--bg);border-radius:12px;box-shadow:0 12px 48px rgba(0,0,0,0.3);width:640px;max-width:94vw;max-height:88vh;display:flex;flex-direction:column;overflow:hidden; }
+    #tool-edit-modal .te-hdr { display:flex;align-items:center;justify-content:space-between;padding:16px 20px;border-bottom:1px solid var(--border); }
+    #tool-edit-modal .te-title { font-size:15px;font-weight:600;color:var(--text); }
+    #tool-edit-modal .te-close { background:none;border:none;font-size:16px;color:var(--text3);cursor:pointer;padding:2px 8px;border-radius:5px; }
+    #tool-edit-modal .te-close:hover { background:var(--surface2);color:var(--text); }
+    #tool-edit-modal .te-body { padding:18px 20px;overflow-y:auto; }
+    #tool-edit-modal .te-grid { display:grid;grid-template-columns:1fr 1fr;gap:12px 16px; }
+    #tool-edit-modal .te-field { display:flex;flex-direction:column;gap:5px; }
+    #tool-edit-modal .te-field-full { grid-column:1 / -1; }
+    #tool-edit-modal .te-field span { font-size:11px;color:var(--text2);font-weight:500; }
+    #tool-edit-modal .te-field input, #tool-edit-modal .te-field select { padding:8px 10px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text);font-size:13px;box-sizing:border-box;width:100%; }
+    #tool-edit-modal .te-field input:focus, #tool-edit-modal .te-field select:focus { outline:none;border-color:var(--accent); }
+    #tool-edit-modal .te-footer { display:flex;justify-content:flex-end;gap:8px;padding:14px 20px;border-top:1px solid var(--border); }
+    .edit-btn { background:none;border:none;cursor:pointer;color:var(--text3);padding:3px 5px;border-radius:4px;vertical-align:middle; }
+    .edit-btn:hover { background:var(--surface2);color:var(--accent); }
+    .input-box { background:var(--bg2);border-radius:10px;box-shadow:0 8px 32px rgba(0,0,0,0.15);width:360px;overflow:hidden; }
+    .input-box-hdr { padding:14px 16px 10px;border-bottom:1px solid var(--border); }
+    .input-box-title { font-size:13px;font-weight:600;color:var(--text1); }
+    .input-box-body { padding:14px 16px; }
+    .input-box-body input { width:100%;padding:8px 12px;border:1px solid var(--border2);border-radius:6px;font-size:12px;font-family:var(--sans);color:var(--text1);background:var(--bg);outline:none;transition:border-color 0.15s; }
+    .input-box-body input:focus { border-color:var(--accent);background:#fff; }
+    .input-box-footer { display:flex;justify-content:flex-end;gap:8px;padding:10px 16px;border-top:1px solid var(--border);background:var(--surface2); }
+    /* Confirm modal */
+    #confirm-modal { position:fixed;inset:0;z-index:210;display:none;align-items:center;justify-content:center;background:rgba(0,0,0,0.28);backdrop-filter:blur(2px); }
+    #confirm-modal.show { display:flex; }
+    .confirm-box { background:var(--bg2);border-radius:12px;box-shadow:0 10px 40px rgba(0,0,0,0.2);width:400px;overflow:hidden;animation:confirmPop 0.16s ease-out; }
+    @keyframes confirmPop { from{opacity:0;transform:scale(0.96) translateY(6px)} to{opacity:1;transform:none} }
+    .confirm-hdr { display:flex;align-items:center;gap:11px;padding:18px 20px 12px; }
+    .confirm-icon { flex:none;width:34px;height:34px;border-radius:50%;background:#fff7e6;color:#e0951f;display:flex;align-items:center;justify-content:center; }
+    .confirm-title { font-size:14px;font-weight:600;color:var(--text1); }
+    .confirm-body { padding:0 20px 16px 65px;font-size:12px;line-height:1.6;color:var(--text2); }
+    .confirm-body b { color:var(--text1);font-weight:600; }
+    .confirm-footer { display:flex;justify-content:flex-end;gap:8px;padding:12px 20px;border-top:1px solid var(--border);background:var(--surface2); }
+    .confirm-footer .tbtn { min-width:72px;justify-content:center; }
+  </style>
+</head>
+<body>
+
+<!-- Custom confirm modal -->
+<div id="confirm-modal">
+  <div class="confirm-box">
+    <div class="confirm-hdr">
+      <div class="confirm-icon">
+        <svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+      </div>
+      <div class="confirm-title" id="confirm-modal-title">Thay đổi chưa lưu</div>
+    </div>
+    <div class="confirm-body" id="confirm-modal-body"></div>
+    <div class="confirm-footer" id="confirm-modal-footer"></div>
+  </div>
+</div>
+
+<!-- Custom input modal -->
+<div id="input-modal">
+  <div class="input-box">
+    <div class="input-box-hdr"><div class="input-box-title" id="input-modal-title">Nhập tên</div></div>
+    <div class="input-box-body"><input id="input-modal-field" type="text" placeholder=""></div>
+    <div class="input-box-footer">
+      <button class="tbtn" onclick="closeInputModal(false)">Huỷ</button>
+      <button class="tbtn tbtn-primary" onclick="closeInputModal(true)">Xác nhận</button>
+    </div>
+  </div>
+</div>
+
+<!-- Modal chỉnh sửa chi tiết 1 dao -->
+<div id="tool-edit-modal">
+  <div class="te-box">
+    <div class="te-hdr">
+      <div class="te-title">Chỉnh sửa dao <span id="te-tool-name" style="color:var(--accent)"></span></div>
+      <button class="te-close" onclick="closeToolEditor(false)" title="Đóng">✕</button>
+    </div>
+    <div class="te-body">
+      <div class="te-grid">
+        <label class="te-field">
+          <span>Số dao (T)</span>
+          <input id="te-tool_number" type="number" min="1" step="1">
+        </label>
+        <label class="te-field">
+          <span>Tên dao</span>
+          <input id="te-name" type="text">
+        </label>
+        <label class="te-field">
+          <span>Đường kính (mm)</span>
+          <input id="te-diameter" type="number" step="0.1" min="0">
+        </label>
+        <label class="te-field">
+          <span>Kiểu dao</span>
+          <select id="te-bit_type" onchange="teToggleVbit()">
+            <option value="flat">Dao cắt</option>
+            <option value="vbit">V-Bit</option>
+          </select>
+        </label>
+        <label class="te-field" id="te-vbit-field">
+          <span>Góc V-Bit (độ)</span>
+          <input id="te-vbit_angle" type="number" step="1" min="1" max="179">
+        </label>
+        <label class="te-field">
+          <span>Stepover (%)</span>
+          <input id="te-stepover" type="number" min="0" max="100">
+        </label>
+        <label class="te-field">
+          <span>Độ sâu tối đa mỗi lần hạ dao (mm)</span>
+          <input id="te-max_depth" type="number" step="0.5" min="1">
+        </label>
+        <label class="te-field">
+          <span>Tốc độ trục (RPM)</span>
+          <input id="te-rpm" type="number" step="500">
+        </label>
+        <label class="te-field">
+          <span>Feed cắt (mm/ph)</span>
+          <input id="te-feed" type="number" step="50">
+        </label>
+        <label class="te-field">
+          <span>Feed hạ Z (mm/ph)</span>
+          <input id="te-z_feed" type="number" step="50">
+        </label>
+        <label class="te-field">
+          <span>Lệnh bật trục</span>
+          <input id="te-spindle_on" type="text" placeholder="Trống = mặc định post">
+        </label>
+        <label class="te-field">
+          <span>Lệnh tắt trục</span>
+          <input id="te-spindle_off" type="text" placeholder="Trống = mặc định post">
+        </label>
+        <label class="te-field te-field-full">
+          <span>Ghi chú / lệnh riêng của dao</span>
+          <input id="te-tool_notes" type="text" placeholder="Chèn qua {tool_notes}. Nhiều lệnh ngăn bởi dấu phẩy">
+        </label>
+      </div>
+    </div>
+    <div class="te-footer">
+      <button class="tbtn" onclick="closeToolEditor(false)">Huỷ</button>
+      <button class="tbtn tbtn-primary" onclick="closeToolEditor(true)">Áp dụng</button>
+    </div>
+  </div>
+</div>
+
+<header>
+  <div class="header-left">
+    <div class="logo">N2G</div>
+    <div>
+      <div class="header-title">Quản lý dao cụ</div>
+      <div class="header-sub">Chọn nhóm máy → chỉnh sửa → lưu</div>
+    </div>
+  </div>
+  <div style="font-size:10px;color:var(--text3);font-family:var(--mono)">N2G Settings</div>
+</header>
+
+<!-- Group selector -->
+<div id="group-bar">
+  <span class="group-label">Nhóm máy:</span>
+  <div id="group-buttons"><!-- JS inject --></div>
+  <div class="group-info" id="group-info"></div>
+  <div style="margin-left:auto;display:flex;gap:6px">
+    <button class="tbtn" style="font-size:10px;padding:2px 8px" onclick="addGroup()">+ Thêm nhóm</button>
+    <button class="tbtn" style="font-size:10px;padding:2px 8px" onclick="renameGroup()">✎ Đổi tên</button>
+    <button class="tbtn" style="font-size:10px;padding:2px 8px;color:var(--danger)" onclick="deleteGroup()">✕ Xóa nhóm</button>
+  </div>
+</div>
+
+<!-- Toolbar -->
+<div class="toolbar">
+  <button class="tbtn tbtn-primary" onclick="addRow()">+ Thêm dao</button>
+  <button class="tbtn tbtn-ghost"   onclick="deleteRow()">✕ Xóa</button>
+  <div style="flex:1"></div>
+  <button class="tbtn tbtn-primary" onclick="saveTools()">💾 Lưu nhóm này</button>
+</div>
+
+<!-- Table -->
+<div class="table-wrap">
+  <table>
+    <thead>
+      <tr>
+        <th style="width:36px;text-align:center">Số</th>
+        <th style="width:180px">Tên dao</th>
+        <th style="width:65px">Ø(mm)</th>
+        <th style="width:64px" title="Loại dao cụ">Loại dao</th>
+        <th style="width:50px" title="Góc V-Bit (độ) — chỉ áp dụng khi Loại dao = V-Bit">Góc</th>
+        <th style="width:65px">Bước%</th>
+        <th style="width:75px">Độ sâu tối đa</th>
+        <th style="width:75px">Vòng/phút</th>
+        <th style="width:75px">Tốc độ XY</th>
+        <th style="width:75px">Tốc độ Z</th>
+        <th style="width:70px" title="Lệnh bật mô tơ (để trống = dùng mặc định post, vd M03)">Bật mô tơ</th>
+        <th style="width:70px" title="Lệnh tắt mô tơ (để trống = dùng mặc định post, vd M05)">Tắt mô tơ</th>
+        <th style="width:90px" title="Ghi chú/lệnh riêng của dao — chèn vào post qua {tool_notes}. Nhiều lệnh ngăn bởi dấu phẩy">Lệnh riêng</th>
+        <th style="width:60px"></th>
+      </tr>
+    </thead>
+    <tbody id="tool-tbody"></tbody>
+  </table>
+</div>
+
+<footer>
+  <div id="status-dot"></div>
+  <div id="status-text">Chờ dữ liệu...</div>
+  <div id="tool-count"></div>
+</footer>
+
+<script>
+let TOOLS        = [];
+let GROUPS       = [];
+let ACTIVE_GROUP = null;
+let selectedRow  = -1;
+let isDirty      = false;
+
+// ── Init (Ruby → JS) ──
+function n2gToolsInit(tools, groups, activeGroupId) {
+  TOOLS  = tools  || [];
+  GROUPS = groups || [];
+  renderGroupButtons(activeGroupId);
+  // Auto load tools từ active group
+  if (ACTIVE_GROUP && ACTIVE_GROUP.tools && ACTIVE_GROUP.tools.length > 0) {
+    TOOLS = ACTIVE_GROUP.tools.map(t => ({...t}));
+  }
+  render();
+  setStatus('ok', `Đã tải ${TOOLS.length} dao`);
+}
+
+// ── Group buttons ──
+function renderGroupButtons(activeId) {
+  const bar = document.getElementById('group-buttons');
+  bar.innerHTML = GROUPS.map(g => `
+    <button class="group-btn ${g.id === activeId ? 'active' : ''}"
+            id="grp-${g.id}"
+            onclick="switchGroup('${g.id}')">
+      ${g.name}
+    </button>
+  `).join('');
+
+  ACTIVE_GROUP = GROUPS.find(g => g.id === activeId) || GROUPS[0];
+  updateGroupInfo();
+}
+
+async function switchGroup(groupId) {
+  // Flush ô đang gõ dở (chưa blur) để onchange kịp chạy → isDirty cập nhật đúng
+  if (document.activeElement && document.activeElement.tagName === 'INPUT') {
+    document.activeElement.blur();
+  }
+  if (isDirty) {
+    const choice = await showConfirmModal(
+      'Thay đổi chưa lưu',
+      `Nhóm <b>${esc(ACTIVE_GROUP ? ACTIVE_GROUP.name : '')}</b> đang có thay đổi chưa lưu. Bạn muốn làm gì trước khi chuyển nhóm?`,
+      [
+        { label:'Ở lại',   value:'cancel', kind:'ghost' },
+        { label:'Bỏ thay đổi', value:'discard', kind:'danger' },
+        { label:'Lưu rồi chuyển', value:'save', kind:'primary' }
+      ]
+    );
+    if (choice === 'cancel') return;
+    if (choice === 'save') saveTools();
+    // 'discard' → tiếp tục, bỏ thay đổi
+  }
+  document.querySelectorAll('.group-btn').forEach(b => b.classList.remove('active'));
+  const btn = document.getElementById('grp-' + groupId);
+  if (btn) btn.classList.add('active');
+  ACTIVE_GROUP = GROUPS.find(g => g.id === groupId);
+  updateGroupInfo();
+  sketchup.switch_group_callback(groupId);
+  // Auto load tools từ nhóm
+  if (ACTIVE_GROUP) {
+    TOOLS = ACTIVE_GROUP.tools.map(t => ({...t}));
+    selectedRow = -1;
+    isDirty = false;
+    render();
+    setStatus('ok', `Đã load ${TOOLS.length} dao từ nhóm "${ACTIVE_GROUP.name}"`);
+  }
+}
+
+function updateGroupInfo() {
+  if (!ACTIVE_GROUP) return;
+  document.getElementById('group-info').textContent =
+    `${ACTIVE_GROUP.machine}  ·  ${ACTIVE_GROUP.spindles} đầu dao`;
+}
+
+async function loadFromGroup() {
+  if (!ACTIVE_GROUP) return;
+  if (document.activeElement && document.activeElement.tagName === 'INPUT') {
+    document.activeElement.blur();
+  }
+  if (isDirty) {
+    const choice = await showConfirmModal(
+      'Thay đổi chưa lưu',
+      `Load lại từ nhóm <b>${esc(ACTIVE_GROUP.name)}</b> sẽ thay thế các thay đổi chưa lưu. Bạn muốn làm gì?`,
+      [
+        { label:'Ở lại',   value:'cancel', kind:'ghost' },
+        { label:'Bỏ & Load lại', value:'discard', kind:'danger' }
+      ]
+    );
+    if (choice !== 'discard') return;
+  }
+  TOOLS = ACTIVE_GROUP.tools.map(t => ({...t}));
+  selectedRow = -1;
+  isDirty = false;
+  render();
+  setStatus('ok', `Đã load ${TOOLS.length} dao từ nhóm "${ACTIVE_GROUP.name}"`);
+}
+
+// ── Render table ──
+function render() {
+  const tbody = document.getElementById('tool-tbody');
+  document.getElementById('tool-count').textContent = `${TOOLS.length} dao`;
+
+  if (!TOOLS.length) {
+    tbody.innerHTML = `<tr><td colspan="14" style="text-align:center;padding:40px;color:var(--text3)">Chưa có dao — nhấn "+ Thêm dao" hoặc "↺ Load từ nhóm"</td></tr>`;
+    return;
+  }
+
+  tbody.innerHTML = TOOLS.map((t, i) => `
+    <tr class="${i === selectedRow ? 'selected' : ''}" onclick="selectRow(${i})">
+      <td><input class="cell-input" type="number" value="${t.tool_number||i+1}" min="1" style="text-align:center;color:var(--accent);font-weight:600" onchange="update(${i},'tool_number',+this.value)" onclick="e(event)"></td>
+      <td><input class="cell-input" type="text"   value="${esc(t.name||'')}"     onchange="update(${i},'name',this.value)"        onclick="e(event)"></td>
+      <td><input class="cell-input" type="number" value="${t.diameter||6}"       onchange="update(${i},'diameter',+this.value)"   onclick="e(event)" step="0.1"></td>
+      <td><select class="cell-input" onchange="updateBitType(${i},this.value)" onclick="e(event)">
+        <option value="flat" ${(t.bit_type||'flat')==='flat'?'selected':''}>Dao cắt</option>
+        <option value="vbit" ${t.bit_type==='vbit'?'selected':''}>V-Bit</option>
+      </select></td>
+      <td>${t.bit_type==='vbit'
+        ? `<input class="cell-input" type="number" value="${t.vbit_angle||120}" step="1" min="1" max="179"
+            onchange="update(${i},'vbit_angle',Math.max(1,Math.min(179,+this.value||120)))" onclick="e(event)"
+            title="Góc V-Bit (độ)">`
+        : `<span style="color:var(--text3);font-size:12px;display:block;text-align:center;opacity:0.5">—</span>`
+      }</td>
+      <td><input class="cell-input" type="number" value="${t.stepover||90}"      onchange="update(${i},'stepover',+this.value)"   onclick="e(event)" min="0" max="100"></td>
+      <td><input class="cell-input" type="number" value="${t.max_depth||20}"    onchange="update(${i},'max_depth',+this.value)"  onclick="e(event)" step="0.5"></td>
+      <td><input class="cell-input" type="number" value="${t.rpm||18000}"        onchange="update(${i},'rpm',+this.value)"        onclick="e(event)" step="500"></td>
+      <td><input class="cell-input" type="number" value="${t.feed||2000}"        onchange="update(${i},'feed',+this.value)"       onclick="e(event)" step="50"></td>
+      <td><input class="cell-input" type="number" value="${t.z_feed||600}"       onchange="update(${i},'z_feed',+this.value)"     onclick="e(event)" step="50"></td>
+      <td><input class="cell-input" type="text" value="${esc(t.spindle_on||'')}"  onchange="update(${i},'spindle_on',this.value.trim())"  onclick="e(event)" style="text-align:center" title="Để trống = dùng mặc định post. Nhiều lệnh: ngăn bởi dấu phẩy, vd M33,M70"></td>
+      <td><input class="cell-input" type="text" value="${esc(t.spindle_off||'')}" onchange="update(${i},'spindle_off',this.value.trim())" onclick="e(event)" style="text-align:center" title="Để trống = dùng mặc định post. Nhiều lệnh: ngăn bởi dấu phẩy, vd M35,M70,M24"></td>
+      <td><input class="cell-input" type="text" value="${esc(t.tool_notes||'')}" onchange="update(${i},'tool_notes',this.value.trim())" onclick="e(event)" title="Lệnh/ghi chú riêng của dao, chèn vào post qua {tool_notes}. Nhiều dòng: ngăn bởi dấu phẩy hoặc ; vd T2300,H23,M33 S88"></td>
+      <td style="white-space:nowrap"><button class="edit-btn" onclick="openToolEditor(${i});event.stopPropagation()" title="Chỉnh sửa dao"><svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M11.5 2.5l2 2L6 12l-2.5.5L4 10z"/></svg></button><button class="dup-btn" onclick="duplicateRowAt(${i});event.stopPropagation()" title="Nhân bản dao này"><svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="5" y="5" width="8" height="8" rx="1.5"/><path d="M3 11V4a1 1 0 0 1 1-1h7"/></svg></button><button class="del-btn" onclick="deleteRowAt(${i});event.stopPropagation()" title="Xóa">✕</button></td>
+    </tr>
+  `).join('');
+}
+
+function e(ev) { ev.stopPropagation(); }
+function esc(s) { return String(s).replace(/"/g,'&quot;').replace(/</g,'&lt;'); }
+
+function selectRow(i) { selectedRow = (selectedRow===i) ? -1 : i; render(); }
+
+function vbitMaxDepth(diameter, angle) {
+  // max_depth = halfD / tan(angle/2)
+  const halfD = diameter / 2;
+  const rad = (angle || 120) * Math.PI / 180 / 2;
+  return +(halfD / Math.tan(rad)).toFixed(2);
+}
+
+function update(i, field, val) {
+  TOOLS[i][field] = val;
+
+  // Dòng vừa thêm mới (_isNew): sửa Ø sẽ tự cập nhật feed/z_feed theo bảng tra.
+  // Sửa field bất kỳ khác (kể cả lại sửa Ø lần nữa sau khi đã chạm field khác) → bỏ cờ _isNew.
+  if (TOOLS[i]._isNew && field === 'diameter') {
+    const feeds = defaultFeedsForDiameter(val);
+    TOOLS[i].feed = feeds.feed;
+    TOOLS[i].z_feed = feeds.z_feed;
+  } else if (field !== 'diameter') {
+    delete TOOLS[i]._isNew;
+  }
+
+  // V-Bit: đổi Ø hoặc Góc → tự tính lại max_depth = halfD/tan(angle/2)
+  if (TOOLS[i].bit_type === 'vbit' && (field === 'diameter' || field === 'vbit_angle')) {
+    TOOLS[i].max_depth = vbitMaxDepth(TOOLS[i].diameter, TOOLS[i].vbit_angle);
+  }
+
+  if (field === 'diameter' || field === 'vbit_angle') {
+    render();
+    // Giữ focus lại ô vừa sửa sau khi re-render
+    setTimeout(() => {
+      const row = document.querySelector(`#tool-tbody tr:nth-child(${i+1})`);
+      // Không dùng optional chaining (?.): SketchUp 2021 chạy CEF cũ (~Chrome 64)
+      // chưa hỗ trợ, sẽ lỗi "Unexpected token ." và chết cả khối <script>.
+      const inputs = row ? row.querySelectorAll('input[type="number"]') : null;
+      // [0]=tool_number, [1]=diameter, [2]=vbit_angle (nếu vbit)
+      const target = inputs ? (field === 'diameter' ? inputs[1] : inputs[2]) : null;
+      if (target) target.focus();
+    }, 0);
+  }
+
+  if (field !== 'name') { // re-render chỉ khi cần thiết
+    const tn = document.querySelector(`#tool-tbody tr:nth-child(${i+1}) .cell-tn`);
+    if (tn) tn.textContent = TOOLS[i].tool_number || i+1;
+  }
+  markDirty();
+}
+
+function updateBitType(i, val) {
+  TOOLS[i].bit_type = val;
+  if (val !== 'vbit' && !TOOLS[i].vbit_angle) TOOLS[i].vbit_angle = 120;
+  if (val === 'vbit') {
+    TOOLS[i].max_depth = vbitMaxDepth(TOOLS[i].diameter, TOOLS[i].vbit_angle);
+  }
+  delete TOOLS[i]._isNew;
+  render();
+  markDirty();
+}
+
+function defaultFeedsForDiameter(d) {
+  // D6→XY12000/Z3000, D5→XY9000/Z3000, D4→XY6000/Z2000, D3→XY4000/Z2000
+  // Lớn hơn 6 dùng thông số D6, nhỏ hơn 3 dùng thông số D3
+  if (d >= 6) return { feed: 12000, z_feed: 3000 };
+  if (d >= 5) return { feed: 9000,  z_feed: 3000 };
+  if (d >= 4) return { feed: 6000,  z_feed: 2000 };
+  return { feed: 4000, z_feed: 2000 };
+}
+
+function addRow() {
+  const nextTn = TOOLS.length > 0 ? Math.max(...TOOLS.map(t => t.tool_number||0)) + 1 : 1;
+  const defDiameter = 6;
+  const feeds = defaultFeedsForDiameter(defDiameter);
+  TOOLS.push({ tool_number:nextTn, name:'Dao mới', diameter:defDiameter, bit_type:'flat', vbit_angle:120, stepover:90, max_depth:20, rpm:18000, feed:feeds.feed, z_feed:feeds.z_feed, spindle_on:'', spindle_off:'', tool_notes:'', _isNew:true });
+  selectedRow = TOOLS.length - 1;
+  render();
+  markDirty();
+  setTimeout(() => {
+    const row = document.querySelector(`#tool-tbody tr:nth-child(${selectedRow+1})`);
+    if (row) { var _i = row.querySelector('input'); if (_i) _i.focus(); }
+  }, 50);
+}
+
+function deleteRow() {
+  if (selectedRow < 0) { setStatus('error','Chọn 1 dòng trước'); return; }
+  deleteRowAt(selectedRow);
+}
+
+function deleteRowAt(i) {
+  TOOLS.splice(i, 1);
+  selectedRow = Math.min(selectedRow, TOOLS.length - 1);
+  render(); markDirty();
+}
+
+function duplicateRowAt(i) {
+  if (i < 0 || i >= TOOLS.length) return;
+  // Sao chép sâu dòng dao gốc
+  const src = JSON.parse(JSON.stringify(TOOLS[i]));
+  delete src._isNew;
+  // Số dao mới = lớn nhất hiện có + 1 (tránh trùng)
+  src.tool_number = TOOLS.length > 0 ? Math.max(...TOOLS.map(t => t.tool_number||0)) + 1 : 1;
+  // Đổi tên để phân biệt bản sao
+  src.name = (TOOLS[i].name || 'Dao') + ' (copy)';
+  // Chèn ngay sau dòng gốc
+  TOOLS.splice(i + 1, 0, src);
+  selectedRow = i + 1;
+  render(); markDirty();
+  setTimeout(() => {
+    const row = document.querySelector(`#tool-tbody tr:nth-child(${selectedRow+1})`);
+    if (row) { row.scrollIntoView({block:'nearest'});
+               var _i2 = row.querySelector('input'); if (_i2) _i2.focus(); }
+  }, 50);
+}
+
+// ── Modal chỉnh sửa chi tiết 1 dao ──
+let _teIndex = -1;
+
+function openToolEditor(i) {
+  if (i < 0 || i >= TOOLS.length) return;
+  _teIndex = i;
+  const t = TOOLS[i];
+  const v = (id, val) => { const el = document.getElementById(id); if (el) el.value = (val==null?'':val); };
+
+  document.getElementById('te-tool-name').textContent = t.name ? ('· ' + t.name) : '';
+  v('te-tool_number', t.tool_number || i+1);
+  v('te-name',        t.name || '');
+  v('te-diameter',    t.diameter || 6);
+  v('te-bit_type',    t.bit_type || 'flat');
+  v('te-vbit_angle',  t.vbit_angle || 120);
+  v('te-stepover',    t.stepover != null ? t.stepover : 90);
+  v('te-max_depth',   t.max_depth != null ? Math.abs(t.max_depth) : 20);
+  v('te-rpm',         t.rpm || 18000);
+  v('te-feed',        t.feed || 2000);
+  v('te-z_feed',      t.z_feed || 600);
+  v('te-spindle_on',  t.spindle_on || '');
+  v('te-spindle_off', t.spindle_off || '');
+  v('te-tool_notes',  t.tool_notes || '');
+
+  teToggleVbit();
+  document.getElementById('tool-edit-modal').classList.add('show');
+}
+
+// Ẩn/hiện ô góc V-Bit theo kiểu dao
+function teToggleVbit() {
+  const isV = document.getElementById('te-bit_type').value === 'vbit';
+  document.getElementById('te-vbit-field').style.display = isV ? '' : 'none';
+}
+
+function closeToolEditor(apply) {
+  const modal = document.getElementById('tool-edit-modal');
+  if (apply && _teIndex >= 0 && _teIndex < TOOLS.length) {
+    const t = TOOLS[_teIndex];
+    const num  = id => { const el = document.getElementById(id); return el ? +el.value : undefined; };
+    const str  = id => { const el = document.getElementById(id); return el ? el.value.trim() : ''; };
+
+    t.tool_number = num('te-tool_number') || (_teIndex+1);
+    t.name        = str('te-name');
+    t.diameter    = num('te-diameter') || 6;
+    t.bit_type    = document.getElementById('te-bit_type').value;
+    t.vbit_angle  = Math.max(1, Math.min(179, num('te-vbit_angle') || 120));
+    t.stepover    = num('te-stepover');
+    t.max_depth   = Math.abs(num('te-max_depth')) || 20;
+    t.rpm         = num('te-rpm');
+    t.feed        = num('te-feed');
+    t.z_feed      = num('te-z_feed');
+    t.spindle_on  = str('te-spindle_on');
+    t.spindle_off = str('te-spindle_off');
+    t.tool_notes  = str('te-tool_notes');
+
+    selectedRow = _teIndex;
+    render();
+    markDirty();
+  }
+  modal.classList.remove('show');
+  _teIndex = -1;
+}
+
+function saveTools() {
+  // Lưu tools vào ACTIVE_GROUP rồi lưu toàn bộ groups
+  if (!ACTIVE_GROUP) { setStatus('error','Chưa chọn nhóm'); return; }
+  ACTIVE_GROUP.tools = TOOLS.map(t => {
+    const clean = JSON.parse(JSON.stringify(t));
+    delete clean._isNew; // cờ tạm chỉ dùng trong session UI, không lưu vào file
+    return clean;
+  });
+  setStatus('saving','Đang lưu...');
+  sketchup.save_tool_groups_callback(JSON.stringify(GROUPS));
+}
+
+// ── Custom confirm modal (thay confirm() mặc định) ──
+// buttons: mảng {label, value, kind}. kind: 'primary'|'ghost'|'danger'
+let _confirmResolve=null;
+function showConfirmModal(title, bodyHtml, buttons){
+  return new Promise(resolve=>{
+    _confirmResolve=resolve;
+    document.getElementById('confirm-modal-title').textContent=title;
+    document.getElementById('confirm-modal-body').innerHTML=bodyHtml;
+    const ft=document.getElementById('confirm-modal-footer');
+    ft.innerHTML='';
+    buttons.forEach(b=>{
+      const btn=document.createElement('button');
+      btn.className='tbtn'+(b.kind==='primary'?' tbtn-primary':b.kind==='danger'?' tbtn-danger':'');
+      btn.textContent=b.label;
+      btn.onclick=()=>closeConfirmModal(b.value);
+      ft.appendChild(btn);
+    });
+    document.getElementById('confirm-modal').classList.add('show');
+  });
+}
+function closeConfirmModal(val){
+  document.getElementById('confirm-modal').classList.remove('show');
+  if(_confirmResolve){ _confirmResolve(val); _confirmResolve=null; }
+}
+
+// ── Custom input modal ──
+let _inputResolve=null;
+function showInputModal(title, defaultVal=''){
+  return new Promise(resolve=>{
+    _inputResolve=resolve;
+    document.getElementById('input-modal-title').textContent=title;
+    const f=document.getElementById('input-modal-field');
+    f.value=defaultVal; f.placeholder='';
+    document.getElementById('input-modal').classList.add('show');
+    setTimeout(()=>{f.focus();f.select();},50);
+  });
+}
+function closeInputModal(ok){
+  document.getElementById('input-modal').classList.remove('show');
+  const val=document.getElementById('input-modal-field').value.trim();
+  if(_inputResolve){_inputResolve(ok&&val?val:null);_inputResolve=null;}
+}
+
+async function addGroup() {
+  const name = await showInputModal('Tên nhóm máy (ví dụ: Thuận An (4 đầu))');
+  if (!name) return;
+  const newId = 'group_' + Date.now();
+  GROUPS.push({ id:newId, name, machine:'', description:'', spindles:1, tools:[] });
+  renderGroupButtons(newId);
+  TOOLS = []; render(); markDirty();
+}
+
+async function renameGroup() {
+  if (!ACTIVE_GROUP) return;
+  const cur = ACTIVE_GROUP.machine ? `${ACTIVE_GROUP.name} (${ACTIVE_GROUP.machine})` : ACTIVE_GROUP.name;
+  const name = await showInputModal('Đổi tên nhóm', cur);
+  if (!name) return;
+  ACTIVE_GROUP.name = name;
+  ACTIVE_GROUP.machine = '';
+  renderGroupButtons(ACTIVE_GROUP.id);
+  markDirty();
+}
+
+async function deleteGroup() {
+  if (!ACTIVE_GROUP) return;
+  if (GROUPS.length <= 1) { setStatus('error','Phải có ít nhất 1 nhóm'); return; }
+  const choice = await showConfirmModal(
+    'Xóa nhóm máy',
+    `Bạn có chắc muốn xóa nhóm <b>"${ACTIVE_GROUP.name}"</b>?<br><span style="color:var(--text2);font-size:12px">Toàn bộ dao trong nhóm sẽ bị xóa. Không thể hoàn tác.</span>`,
+    [
+      { label:'Hủy', value:'cancel', kind:'ghost' },
+      { label:'Xóa nhóm', value:'delete', kind:'danger' }
+    ]
+  );
+  if (choice !== 'delete') return;
+  GROUPS = GROUPS.filter(g => g.id !== ACTIVE_GROUP.id);
+  // Xóa nhóm → mọi thay đổi chưa lưu CỦA NHÓM ĐÓ cũng biến mất theo.
+  // Reset isDirty TRƯỚC khi loadFromGroup để nó không hỏi "thay đổi chưa lưu".
+  isDirty = false;
+  renderGroupButtons(GROUPS[0].id);
+  loadFromGroup();
+  // Xóa nhóm là thao tác HOÀN TẤT ngay: lưu danh sách nhóm mới xuống file.
+  // KHÔNG markDirty() — nhóm đang xem (GROUPS[0]) vừa nạp mới, sạch, chưa hề sửa.
+  isDirty = false;
+  sketchup.save_tool_groups_callback(JSON.stringify(GROUPS));
+  setStatus('ok', 'Đã xóa nhóm');
+}
+
+// ── Feedback từ Ruby ──
+function n2gSaveResult(ok, msg) {
+  isDirty = !ok;
+  if (ok && ACTIVE_GROUP) {
+    setStatus('ok', `Đã lưu nhóm "${ACTIVE_GROUP.name}"`);
+  } else {
+    setStatus(ok ? 'ok' : 'error', msg);
+  }
+}
+
+function markDirty() {
+  isDirty = true;
+  setStatus('saving','Có thay đổi chưa lưu');
+}
+
+function setStatus(state, msg) {
+  document.getElementById('status-dot').className = state;
+  document.getElementById('status-text').textContent = msg;
+}
+
+window.onload = () => {
+  document.getElementById('input-modal-field').addEventListener('keydown',e=>{
+    if(e.key==='Enter') closeInputModal(true);
+    if(e.key==='Escape') closeInputModal(false);
+  });
+  // Modal chỉnh sửa dao: Esc = huỷ, Enter = áp dụng (trừ khi đang gõ trong ô notes)
+  document.getElementById('tool-edit-modal').addEventListener('keydown',e=>{
+    if(e.key==='Escape') closeToolEditor(false);
+    if(e.key==='Enter')  closeToolEditor(true);
+  });
+  // Click nền ngoài hộp để đóng
+  document.getElementById('tool-edit-modal').addEventListener('mousedown',e=>{
+    if(e.target.id==='tool-edit-modal') closeToolEditor(false);
+  });
+  sketchup.tool_dialog_ready(JSON.stringify({
+    screen_w: window.screen.width,
+    screen_h: window.screen.height
+  }));
+};
+</script>
+</body>
+</html>

@@ -1,0 +1,32 @@
+[
+  {
+    "tool_number": 1,
+    "name": "T1 D6",
+    "diameter": 6,
+    "stepover": 90,
+    "max_depth": -17.5,
+    "rpm": 18000,
+    "feed": 2500,
+    "z_feed": 800
+  },
+  {
+    "tool_number": 2,
+    "name": "T2 D5",
+    "diameter": 5,
+    "stepover": 0,
+    "max_depth": -12.5,
+    "rpm": 18000,
+    "feed": 0,
+    "z_feed": 400
+  },
+  {
+    "tool_number": 3,
+    "name": "T3 D15",
+    "diameter": 15,
+    "stepover": 0,
+    "max_depth": -12.5,
+    "rpm": 18000,
+    "feed": 0,
+    "z_feed": 300
+  }
+]

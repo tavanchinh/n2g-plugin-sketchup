@@ -1,0 +1,71 @@
+[
+  {
+    "id": "group_1787213611487",
+    "name": "Máy 4 đầu",
+    "machine": "",
+    "description": "",
+    "spindles": 1,
+    "tools": [
+      {
+        "tool_number": 1,
+        "name": "T1D6",
+        "diameter": 6,
+        "bit_type": "flat",
+        "vbit_angle": 120,
+        "stepover": 90,
+        "max_depth": 20,
+        "rpm": 18000,
+        "feed": 12000,
+        "z_feed": 3000,
+        "spindle_on": "",
+        "spindle_off": "",
+        "tool_notes": ""
+      },
+      {
+        "tool_number": 2,
+        "name": "T2D5",
+        "diameter": 5,
+        "bit_type": "flat",
+        "vbit_angle": 120,
+        "stepover": 90,
+        "max_depth": 20,
+        "rpm": 18000,
+        "feed": 12000,
+        "z_feed": 3000,
+        "spindle_on": "",
+        "spindle_off": "",
+        "tool_notes": ""
+      },
+      {
+        "tool_number": 3,
+        "name": "T3D15",
+        "diameter": 15,
+        "bit_type": "flat",
+        "vbit_angle": 120,
+        "stepover": 90,
+        "max_depth": 20,
+        "rpm": 18000,
+        "feed": 12000,
+        "z_feed": 3000,
+        "spindle_on": "",
+        "spindle_off": "",
+        "tool_notes": ""
+      },
+      {
+        "tool_number": 4,
+        "name": "T4D32 (Bào nền)",
+        "diameter": 32,
+        "bit_type": "flat",
+        "vbit_angle": 120,
+        "stepover": 90,
+        "max_depth": 20,
+        "rpm": 18000,
+        "feed": 8000,
+        "z_feed": 3000,
+        "spindle_on": "",
+        "spindle_off": "",
+        "tool_notes": ""
+      }
+    ]
+  }
+]

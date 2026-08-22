@@ -1,0 +1,52 @@
+{
+  "antiflyout": true,
+  "entry_backoff": true,
+  "entry_backoff_mm": 20,
+  "double_cut": true,
+  "small_threshold": 300,
+  "double_cut_offset": 2.5,
+  "slowdown": true,
+  "custom_name": true,
+  "name_parts": [
+    "index",
+    "color",
+    "thickness",
+    "side"
+  ],
+  "name_seps": [
+    "_",
+    "_",
+    "_"
+  ],
+  "remove_accent": true,
+  "side_top": "Z",
+  "side_bot": "F",
+  "folder_color": true,
+  "folder_thickness": true,
+  "font_size": 15,
+  "nesting_gap": 6.5,
+  "zzero": "table",
+  "board_length": 2440,
+  "board_width": 1220,
+  "workarea": {
+    "025MM": {
+      "actual_thickness": 17
+    }
+  },
+  "active_tool_preset": "1787213743743",
+  "thresh_bot": 413,
+  "thresh_top": 351,
+  "cut_dir": "ccw",
+  "afv_sel": {
+    "left": 1,
+    "right": 3,
+    "top": 2,
+    "bottom": 0
+  },
+  "avoid_curve": false,
+  "ramp_on": true,
+  "ramp_len": 20,
+  "arc_interp": false,
+  "arc_min_r": 60,
+  "long_final_edge": true
+}

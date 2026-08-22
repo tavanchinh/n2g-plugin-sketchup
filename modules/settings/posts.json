@@ -1,0 +1,34 @@
+[
+  {
+    "unit": "G21",
+    "safe_z": 40,
+    "clear_z": 40,
+    "ext": ".nc",
+    "comment": "( ... )",
+    "spindle_on": "M03",
+    "spindle_off": "M05",
+    "cool_on": "M16",
+    "cool_off": "M17",
+    "header": "G90\nG54\n{clamp}\n{tool_notes}\n{spindle_on} S{rpm}",
+    "toolchange": "{spindle_off}\n{tool_notes}\n{spindle_on} S{rpm}",
+    "footer": "{spindle_off}\nG0 Z{safe_z}\n{unclamp}\nG0 X600.000 Y2460.000\nM30",
+    "name": "CNC TRUNG TAM",
+    "id": "post_1781925553581"
+  },
+  {
+    "unit": "G21",
+    "safe_z": 40,
+    "clear_z": 40,
+    "ext": ".nc",
+    "comment": "off",
+    "spindle_on": "M03",
+    "spindle_off": "M05",
+    "cool_on": "",
+    "cool_off": "",
+    "header": "G90\nG54\nT{tool_number}\nG43 H{tool_number}\n{spindle_on} S{rpm}",
+    "toolchange": "{spindle_off}\nT{tool_number}\nG43 H{tool_number}\n{spindle_on} S{rpm}",
+    "footer": "G00 Z50.0\n{spindle_off}\nG0 X400.000 Y2400.000\nM30",
+    "name": "TA VAN CHINH",
+    "id": "post_1784084555309"
+  }
+]
