@@ -3,7 +3,7 @@
   "entry_backoff": true,
   "entry_backoff_mm": 20,
   "double_cut": true,
-  "small_threshold": 300,
+  "small_threshold": 200,
   "double_cut_offset": 2.5,
   "slowdown": true,
   "custom_name": true,
@@ -33,7 +33,7 @@
       "actual_thickness": 17
     }
   },
-  "active_tool_preset": "1787213743743",
+  "active_tool_preset": "1787730608832",
   "thresh_bot": 413,
   "thresh_top": 351,
   "cut_dir": "ccw",

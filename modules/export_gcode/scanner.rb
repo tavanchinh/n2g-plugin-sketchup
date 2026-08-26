@@ -118,16 +118,20 @@ module N2G
             inner_layers     = inner_edges.map { |e| GcodeEngine.normalize_layer(e.layer.name) }.uniq
             single_layer     = (inner_layers.size == 1)
 
-            is_drill_by_cfg  = cfg_from_tools && cfg_from_tools[:type] == :drill && single_layer
+            has_drill_cfg = cfg_from_tools &&
+              (cfg_from_tools[:type] == :drill || cfg_from_tools[:n2g_has_drill] == true)
+            has_non_drill_cfg = cfg_from_tools &&
+              (cfg_from_tools[:type] != :drill || cfg_from_tools[:n2g_has_non_drill] == true)
+            is_drill_by_cfg  = has_drill_cfg && single_layer
             # Chỉ nhận drill theo HÌNH DẠNG khi layer KHÔNG có config với type khác.
             # Nếu layer được cấu hình pocket/profile (vd lỗ D16 hạ nền) thì dù tròn
             # cũng KHÔNG phải drill — để nó thành loop pocket/profile.
-            has_non_drill_cfg = cfg_from_tools && cfg_from_tools[:type] != :drill
             is_drill_by_shape = !is_drill_by_cfg && !has_non_drill_cfg && single_layer && is_drill_group?(inner)
 
             if (is_drill_by_cfg || is_drill_by_shape) && !is_lab
               l_name        = GcodeEngine.normalize_layer(first_edge_layer || ent.layer.name)
               cfg           = tools[l_name]
+              drill_cfg     = (cfg && cfg[:n2g_drill_cfg]) || cfg
               ent_full_trans = trans * ent.transformation
 
               # So layer đã NORMALIZE (tên thô có thể là 'ABF-D5' còn l_name là 'ABF_D5')
@@ -171,8 +175,8 @@ module N2G
                   # nghĩa đường kính (vd D15 → 15mm). Đo hình học chỉ DỰ PHÒNG khi không có
                   # config. Đo bằng CHIỀU LỚN HƠN (max dx,dy) — lỗ nghiêng 1 chiều=0 thì
                   # trung bình cho D/2 sai (D15→7.5).
-                  diam = if cfg && cfg[:diameter] && cfg[:diameter] > 0
-                    cfg[:diameter]
+                  diam = if drill_cfg && drill_cfg[:diameter] && drill_cfg[:diameter] > 0
+                    drill_cfg[:diameter]
                   elsif cl_edges.any?
                     xs = cl_edges.flat_map { |e| [e.start.position.x.to_mm, e.end.position.x.to_mm] }
                     ys = cl_edges.flat_map { |e| [e.start.position.y.to_mm, e.end.position.y.to_mm] }
@@ -185,14 +189,16 @@ module N2G
 
                   vec = {
                     x1: cx, y1: cy, x2: cx, y2: cy,
-                    color: (cfg ? cfg[:color] : "#888888"),
+                    color: (drill_cfg ? drill_cfg[:color] : "#888888"),
                     layer: l_name, is_drill_center: true, diameter: diam
                   }
                   clean_arr << vec
                   disp_arr  << vec
                 end
               end
-              next
+              # Pure Drill giu hanh vi cu: thay contour bang center. Mixed
+              # Profile+Drill tiep tuc recurse de giu edge cho Profile.
+              next unless has_non_drill_cfg
             end
 
             # Gán group_id tại group chi tiết (cấp ngay dưới sheet = depth 0).
@@ -224,7 +230,10 @@ module N2G
 
             l_name = GcodeEngine.normalize_layer(ent.layer.name)
             cfg    = tools[l_name]
-            if cfg && cfg[:type] == :drill
+            has_drill_cfg = cfg && (cfg[:type] == :drill || cfg[:n2g_has_drill] == true)
+            has_non_drill_cfg = cfg && (cfg[:type] != :drill || cfg[:n2g_has_non_drill] == true)
+            drill_cfg = (cfg && cfg[:n2g_drill_cfg]) || cfg
+            if has_drill_cfg
               # Edge thuộc layer khoan nhưng nằm lẫn trong group khác (không phải
               # group khoan tròn riêng). Thu thập lại để gom thành cụm → điểm khoan.
               if stray_drills
@@ -234,11 +243,11 @@ module N2G
                   layer: l_name,
                   x1: sp.x.to_mm, y1: sp.y.to_mm,
                   x2: ep.x.to_mm, y2: ep.y.to_mm,
-                  color: (cfg ? cfg[:color] : "#888888"),
-                  diameter: (cfg ? cfg[:diameter] : 5.0)
+                  color: (drill_cfg ? drill_cfg[:color] : "#888888"),
+                  diameter: (drill_cfg ? drill_cfg[:diameter] : 5.0)
                 }
               end
-              next
+              next unless has_non_drill_cfg
             end
 
             lp1   = ent.start.position.transform(trans).transform(sheet_inv)

@@ -307,15 +307,32 @@ function simPushPath(seq, path, tool){
         // Offsets of one Pocket stay at cutting Z. Join them so animation
         // includes the same G1 connectors emitted by Ruby.
         var joined=[];
+        var chunks=[];
         runs.forEach(function(run){
-          if(!run || run.length<2) return;
+          if(!run || run.length<2){
+            if(joined.length>1) chunks.push(joined);
+            joined=[];
+            return;
+          }
+          // Final-order safety check. This runs AFTER in_out reversal, so it
+          // validates the exact connector that animation and Ruby will use.
+          if(joined.length){
+            var prevEnd=joined[joined.length-1], nextStart=run[0];
+            var stepAbs=(+tool.diameter||0)*((+tool.stepover||90)/100);
+            var maxConnector=Math.max(stepAbs*1.5,(+tool.diameter||0)*1.25,1.0);
+            if(Math.hypot(nextStart.x-prevEnd.x,nextStart.y-prevEnd.y)>maxConnector){
+              if(joined.length>1) chunks.push(joined);
+              joined=[];
+            }
+          }
           run.forEach(function(p){ joined.push({x:p.x,y:p.y}); });
         });
-        if(joined.length>1){
+        if(joined.length>1) chunks.push(joined);
+        chunks.forEach(function(chunk){
           seq.push({ layer: tool.layer, tool, type:'pocket', strategy: path.strategy,
-                     pts: joined, feed: feedP, closed:false,
+                     pts: chunk, feed: feedP, closed:false,
                      passInfo: nPassPk>1 ? { idx: pk+1, total: nPassPk } : undefined });
-        }
+        });
       }
     }
     return;  // không có runs → bỏ qua (không vẽ điểm giữa vô nghĩa)

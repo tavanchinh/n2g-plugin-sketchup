@@ -118,17 +118,25 @@ module N2G
       # Pocket XY được sinh duy nhất ở JS/Clipper để G-code khớp đúng preview.
       # Kiểm tra toàn bộ dữ liệu trước khi tạo thư mục/file, tránh xuất file dở dang
       # hoặc âm thầm quay về thuật toán Pocket Ruby khác.
+      def self.tool_jobs_for_layer(tool_library, app_settings, layer)
+        jobs = app_settings[:tool_jobs]
+        jobs = tool_library.values unless jobs.is_a?(Array) && !jobs.empty?
+        norm = GcodeEngine.normalize_layer(layer)
+        jobs.select { |cfg| GcodeEngine.normalize_layer(cfg[:layer]) == norm }
+      end
+
       def self.validate_pocket_paths!(all_sheets, tool_library, app_settings)
         pocket_paths = app_settings[:pocket_paths]
         all_sheets.each do |sheet|
           sheet[:vectors].group_by { |v| v[:layer] }.each_key do |layer|
-            cfg = tool_library[layer] || tool_library[layer.to_s.downcase]
-            next unless cfg && cfg[:type].to_s == 'pocket'
+            cfg = tool_jobs_for_layer(tool_library, app_settings, layer)
+                    .find { |job| job[:type].to_s == 'pocket' }
+            next unless cfg
 
             key = "#{sheet[:name]}::#{layer}"
             paths = pocket_paths.is_a?(Hash) ? (pocket_paths[key] || pocket_paths[key.to_s]) : nil
             runs = paths.is_a?(Array) ? paths.flat_map { |p| p.is_a?(Hash) ? (p['runs'] || p[:runs] || []) : [] } : []
-            valid = !runs.empty? && runs.all? do |run|
+            valid_run = lambda do |run|
               run.is_a?(Array) && run.size >= 2 && run.all? do |point|
                 next false unless point.is_a?(Hash)
                 x = point.key?('x') ? point['x'] : point[:x]
@@ -140,6 +148,9 @@ module N2G
                 end
               end
             end
+            # Empty run is an intentional Safe-Z separator inserted by JS.
+            valid = runs.any? { |run| valid_run.call(run) } &&
+                    runs.all? { |run| (run.is_a?(Array) && run.empty?) || valid_run.call(run) }
             next if valid
 
             raise "Không có đường chạy Pocket hợp lệ từ JS/Clipper cho sheet '#{sheet[:name]}', layer '#{layer}'. Hãy mở lại giao diện và kiểm tra preview trước khi xuất."
@@ -152,8 +163,9 @@ module N2G
         profile_paths = app_settings[:profile_paths]
         all_sheets.each do |sheet|
           sheet[:vectors].group_by { |v| v[:layer] }.each_key do |layer|
-            cfg = tool_library[layer] || tool_library[layer.to_s.downcase]
-            next unless cfg && cfg[:type].to_s == 'profile'
+            cfg = tool_jobs_for_layer(tool_library, app_settings, layer)
+                    .find { |job| job[:type].to_s == 'profile' }
+            next unless cfg
             layer_norm = layer.to_s.upcase.gsub(/[^A-Z0-9]/, '')
             next if layer_norm == 'ABFMARKSQUARE'
             next if cfg[:bit_type].to_s == 'vbit' && cfg[:strategy].to_s == 'cut_in'
@@ -304,13 +316,18 @@ module N2G
           end
 
           File.open(file_path, "w") do |f|
-            tool_order       = tool_library.keys
+            all_tool_jobs = app_settings[:tool_jobs]
+            all_tool_jobs = tool_library.values unless all_tool_jobs.is_a?(Array) && !all_tool_jobs.empty?
+            grouped_lines = sheet[:vectors].group_by { |v| GcodeEngine.normalize_layer(v[:layer]) }
+            work_items = all_tool_jobs.map do |job|
+              layer_key = GcodeEngine.normalize_layer(job[:layer])
+              lines = grouped_lines[layer_key]
+              lines && !lines.empty? ? [layer_key, job, lines] : nil
+            end.compact
             last_tool_number = nil
             last_spindle_off = nil
 
-            first_layer = sheet[:vectors].map { |v| v[:layer] }.uniq
-                            .sort_by { |l| tool_order.index(l) || 999 }.first
-            first_cfg   = (first_layer && tool_library[first_layer]) || {}
+            first_cfg = work_items.empty? ? {} : work_items.first[1]
 
             # Biến của dao đầu tiên cho header (tool_notes, tool_call, spindle riêng)
             first_tnum  = (first_cfg[:tool_number] || 1)
@@ -337,12 +354,7 @@ module N2G
               "clamp"       => clamp_val
             )
 
-            sheet[:vectors].group_by { |v| v[:layer] }
-              .sort_by { |layer, _| tool_order.index(layer) || 999 }
-              .each_with_index do |(layer, lines), tool_idx|
-
-              cfg = tool_library[layer] || tool_library[layer.downcase]
-              next unless cfg
+            work_items.each_with_index do |(layer, cfg, lines), tool_idx|
 
               # Tính depth thực tế
               zzero       = app_settings[:zzero] || 'top'

@@ -176,6 +176,27 @@ function tryDogboneAxis(loopPts, halfD, longIsX){
   var xs=loopPts.map(function(p){return p.x;}), ys=loopPts.map(function(p){return p.y;});
   var x0=Math.min.apply(null,xs), x1=Math.max.apply(null,xs);
   var y0=Math.min.apply(null,ys), y1=Math.max.apply(null,ys);
+  // Các đỉnh lõm của dogbone là chỗ tai relief nối vào thân và phải nằm gần
+  // hai ĐẦU của trục dài. Khấc lớn nằm giữa chi tiết không phải dogbone.
+  var signedArea=0;
+  for(var ai=0;ai<loopPts.length;ai++){
+    var aj=(ai+1)%loopPts.length;
+    signedArea+=loopPts[ai].x*loopPts[aj].y-loopPts[aj].x*loopPts[ai].y;
+  }
+  var areaSign=signedArea>=0?1:-1,reflexCount=0;
+  var endTol=Math.max(halfD*3,1.0);
+  for(var ri=0;ri<loopPts.length;ri++){
+    var ra=loopPts[(ri-1+loopPts.length)%loopPts.length];
+    var rb=loopPts[ri],rc=loopPts[(ri+1)%loopPts.length];
+    var cross=(rb.x-ra.x)*(rc.y-rb.y)-(rb.y-ra.y)*(rc.x-rb.x);
+    if(cross*areaSign < -1e-7){
+      reflexCount++;
+      var lc=longIsX?rb.x:rb.y;
+      var l0=longIsX?x0:y0, l1=longIsX?x1:y1;
+      if(Math.min(Math.abs(lc-l0),Math.abs(l1-lc))>endTol) return null;
+    }
+  }
+  if(reflexCount<2) return null;
   var lr,rr,sr,bx0,bx1,by0,by1;
   if(longIsX){ bx0=x0+halfD; bx1=x1-halfD; lr=[x0,bx0]; rr=[bx1,x1]; sr=[y0,y1]; }
   else       { by0=y0+halfD; by1=y1-halfD; lr=[y0,by0]; rr=[by1,y1]; sr=[x0,x1]; }
@@ -214,6 +235,9 @@ function tryDogboneAxis(loopPts, halfD, longIsX){
 // Hình gần VUÔNG (tai 4 cạnh, đối xứng) → thử cả 2 trục, nhận cái hợp lệ.
 function detectDogboneJS(loopPts, halfD){
   if(!loopPts || loopPts.length<4 || halfD<=0) return null;
+  // Dogbone thật phải có ít nhất một đỉnh lõm tại chỗ tai relief nối với
+  // thân. Polygon hoàn toàn lồi (ví dụ chữ nhật bo góc) không phải dogbone.
+  if(!isConcaveJS(loopPts)) return null;
   var xs=loopPts.map(function(p){return p.x;}), ys=loopPts.map(function(p){return p.y;});
   var bw=Math.max.apply(null,xs)-Math.min.apply(null,xs);
   var bh=Math.max.apply(null,ys)-Math.min.apply(null,ys);
@@ -339,11 +363,30 @@ function drawToolpathPocket(ctx,vecs,tool,tx,ty,sc,dpr){
     }
     // Thu thập ĐƯỜNG CHẠY THẬT (điểm gốc, chưa transform) cho animation.
     var pocketRuns=[];
-    function collectRun(origPts){
+    function collectRun(origPts, breakBefore){
       if(origPts && origPts.length>1){
+        var forwardJump=null,reverseJump=null,maxSafeConnector=null;
+        // Universal fail-safe: adjacent contour offsets should only be about
+        // one stepover apart. A longer jump means another component/region or
+        // an unexpected ordering; never make that move at cutting Z.
+        if(pocketRuns.length && !breakBefore){
+          var prevRun=pocketRuns[pocketRuns.length-1];
+          var prevEnd=prevRun && prevRun[prevRun.length-1];
+          var prevStart=prevRun && prevRun[0];
+          var nextStart=origPts[0];
+          var nextEnd=origPts[origPts.length-1];
+          maxSafeConnector=Math.max(stepoverMM*1.5,tool.diameter*1.25,1.0);
+          forwardJump=(prevEnd&&nextStart) ?
+            Math.hypot(nextStart.x-prevEnd.x,nextStart.y-prevEnd.y) : Infinity;
+          reverseJump=(nextEnd&&prevStart) ?
+            Math.hypot(prevStart.x-nextEnd.x,prevStart.y-nextEnd.y) : Infinity;
+          if(forwardJump>maxSafeConnector || reverseJump>maxSafeConnector){
+            breakBefore=true;
+          }
+        }
         // G-code keeps Z down between offsets of this same Pocket. Show the
         // real cutting connector in preview as well.
-        if(pocketRuns.length){
+        if(pocketRuns.length && !breakBefore){
           var prev=pocketRuns[pocketRuns.length-1];
           var a=prev[prev.length-1], b=origPts[0];
           if(a && b && Math.hypot(b.x-a.x,b.y-a.y)>0.001){
@@ -353,6 +396,7 @@ function drawToolpathPocket(ctx,vecs,tool,tx,ty,sc,dpr){
               cs.color,dpr,null,cs.width);
           }
         }
+        if(breakBefore) pocketRuns.push([]); // Safe-Z separator for Ruby/simulator.
         pocketRuns.push(origPts.map(function(p){return {x:p.x,y:p.y};}));
         if((tool.layer||'').toUpperCase().replace(/[^A-Z0-9]/g,'')==='ABFPHAY14'){
           console.log('[N2G DEBUG] pocket run ABF_PHAY_14', {
@@ -403,7 +447,7 @@ function drawToolpathPocket(ctx,vecs,tool,tx,ty,sc,dpr){
             var dogClipPts=ring.map(function(pt){return {x:tx(pt.x),y:ty(pt.y)};});
             var dogClipStyle=pocketDisplayStyle(ri);
             strokePocketPath(ctx,dogClipPts,dogClipStyle.color,dpr,null,dogClipStyle.width);
-            collectRun(ring.map(function(pt){return {x:pt.x,y:pt.y};}));
+            collectRun(ring.map(function(pt){return {x:pt.x,y:pt.y};}),ring._breakBefore===true);
           });
           return;
         }
@@ -531,7 +575,7 @@ function drawToolpathPocket(ctx,vecs,tool,tx,ty,sc,dpr){
           var pts=ring.map(function(pp){return {x:tx(pp.x),y:ty(pp.y)};});
           var ccStyle=pocketDisplayStyle(ri);
           strokePocketPath(ctx, pts, ccStyle.color, dpr, null, ccStyle.width);
-          collectRun(ring.map(function(pp){return {x:pp.x,y:pp.y};}));
+          collectRun(ring.map(function(pp){return {x:pp.x,y:pp.y};}),ring._breakBefore===true);
         });
         return;
       }
@@ -568,7 +612,7 @@ function drawToolpathPocket(ctx,vecs,tool,tx,ty,sc,dpr){
         var spts = ring.map(function(pt){ return {x:tx(pt.x), y:ty(pt.y)}; });
         var arcStyle=pocketDisplayStyle(ri);
         strokePocketPath(ctx, spts, arcStyle.color, dpr, null, arcStyle.width);
-        collectRun(ring.map(function(pt){ return {x:pt.x, y:pt.y}; }));
+        collectRun(ring.map(function(pt){ return {x:pt.x, y:pt.y}; }),ring._breakBefore===true);
       });
     } else {
       // Pocket có island: offset từ island ra ngoài (như Aspire)
@@ -595,20 +639,28 @@ function drawToolpathPocket(ctx,vecs,tool,tx,ty,sc,dpr){
           if(dx>0.1 && dy>0.1) outerIsRect = false;   // có cạnh xéo/cong
         });
 
-        // Mặc định dùng Clipper cho outer chữ nhật + island (kể cả island bo góc).
-        // Giữ nguyên nhánh bbox/corner cleanup bên dưới làm dự phòng. Có thể đặt
+        // Mặc định dùng Clipper cho mọi biên ngoài có island, bao gồm
+        // chữ nhật, bo góc và biên cong. Giữ nhánh cũ bên dưới làm fallback.
+        // Có thể đặt
         // window.N2G_POCKET_ISLAND_ENGINE='legacy' trước khi mở preview để dùng lại.
         var islandEngine = (typeof window!=='undefined' && window.N2G_POCKET_ISLAND_ENGINE) || 'clipper';
-        if(outerIsRect && islandEngine!=='legacy' && typeof islandClearingRunsClipper==='function'){
+        if(islandEngine!=='legacy' && typeof islandClearingRunsClipper==='function'){
           var clipperIslandRuns=islandClearingRunsClipper(
             islandLoops,loop,halfD,stepoverMM,maxPasses*4
           );
+          // Independent check against the original geometry. This also guards
+          // against Clipper orientation differences in expanded island paths.
+          if(typeof markUnsafePocketConnectorsJS==='function'){
+            clipperIslandRuns=markUnsafePocketConnectorsJS(
+              clipperIslandRuns,loop,islandLoops,halfD
+            );
+          }
           if(clipperIslandRuns.length>0){
             clipperIslandRuns.forEach(function(run,ri){
               var clipPts=run.pts.map(function(pt){return {x:tx(pt.x),y:ty(pt.y)};});
               var clipStyle=pocketDisplayStyle(ri);
               strokePocketPath(ctx,clipPts,clipStyle.color,dpr,null,clipStyle.width);
-              collectRun(run.pts.map(function(pt){return {x:pt.x,y:pt.y};}));
+              collectRun(run.pts.map(function(pt){return {x:pt.x,y:pt.y};}),run.breakBefore===true);
             });
             return;
           }
@@ -620,11 +672,14 @@ function drawToolpathPocket(ctx,vecs,tool,tx,ty,sc,dpr){
         if(!outerIsRect){
           // ── Biên ngoài BO GÓC/CONG → vét tổng quát theo biên dạng thật ──
           var clrRuns = islandClearingRuns(islandLoops[0], loop, halfD, stepoverMM, maxPasses*4);
+          if(typeof markUnsafePocketConnectorsJS==='function'){
+            clrRuns=markUnsafePocketConnectorsJS(clrRuns,loop,islandLoops,halfD);
+          }
           clrRuns.forEach(function(run, ri){
             var spts = run.pts.map(function(pt){ return {x:tx(pt.x), y:ty(pt.y)}; });
             var islandStyle=pocketDisplayStyle(ri);
             strokePocketPath(ctx, spts, islandStyle.color, dpr, null, islandStyle.width);
-            collectRun(run.pts.map(function(pt){ return {x:pt.x, y:pt.y}; }));
+            collectRun(run.pts.map(function(pt){ return {x:pt.x, y:pt.y}; }),run.breakBefore===true);
           });
           return;
         }
@@ -759,7 +814,7 @@ function drawToolpathPocket(ctx,vecs,tool,tx,ty,sc,dpr){
           var spts = ring.map(function(pt){ return {x:tx(pt.x), y:ty(pt.y)}; });
           var niStyle=pocketDisplayStyle(ri);
           strokePocketPath(ctx, spts, niStyle.color, dpr, null, niStyle.width);
-          collectRun(ring.map(function(pt){ return {x:pt.x, y:pt.y}; }));
+          collectRun(ring.map(function(pt){ return {x:pt.x, y:pt.y}; }),ring._breakBefore===true);
         });
       }
     }

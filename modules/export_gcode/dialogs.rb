@@ -446,6 +446,14 @@ module N2G
             #    app_settings bằng symbol. Chuyển app_settings sang symbol.
             hist_post = rec["post"] || {}
             hist_app  = sym.call(rec["app_settings"] || {})
+            # JSON turns Symbol values into String values. Restore these two
+            # fields so history re-export selects the same writer as fresh export.
+            if hist_app[:tool_jobs].is_a?(Array)
+              hist_app[:tool_jobs].each do |job|
+                job[:type] = job[:type].to_sym if job[:type]
+                job[:strategy] = job[:strategy].to_sym if job[:strategy]
+              end
+            end
             # cut_order từ lịch sử (string key theo tên sheet) — app_settings cần :cut_order
             hist_app[:cut_order] = rec["cut_order"] || {}
 
@@ -790,6 +798,7 @@ module N2G
             end
 
             tl = {}
+            tool_jobs = []
             config["tools"].each do |t|
               key   = GcodeEngine.normalize_layer(t["layer"])
               # Nếu dao thiếu field mới → tra catalog theo tên để bổ sung (tương thích dữ liệu cũ)
@@ -799,7 +808,7 @@ module N2G
               tnt = t["tool_notes"];  tnt = cat["tool_notes"]  if tnt.to_s.strip.empty?
               btp = t["bit_type"];    btp = cat["bit_type"]    if btp.to_s.strip.empty?
               vba = t["vbit_angle"];  vba = cat["vbit_angle"]  if vba.nil?
-              tl[key] = {
+              cfg_job = {
                 layer:       key,
                 name:        t["name"],
                 color:       t["color"] || "#888888",
@@ -828,6 +837,22 @@ module N2G
                 ramp_on:          t["ramp_on"] == true,
                 ramp_len:         (t["ramp_len"] || 20).to_f.abs
               }
+              tool_jobs << cfg_job
+              tl[key] = cfg_job
+            end
+
+            # Scanner van can lookup mot cfg/layer, nhung khi cung layer co ca
+            # Profile va Drill phai giu edge nguon DONG THOI tao drill center.
+            # Cac co noi bo nay khong thay doi JSON JS-Ruby.
+            scan_tl = {}
+            tool_jobs.group_by { |cfg| cfg[:layer] }.each do |layer_key, jobs|
+              drill_job = jobs.find { |cfg| cfg[:type] == :drill }
+              non_drill_job = jobs.find { |cfg| cfg[:type] != :drill }
+              scan_cfg = (non_drill_job || drill_job).dup
+              scan_cfg[:n2g_has_drill] = !drill_job.nil?
+              scan_cfg[:n2g_has_non_drill] = !non_drill_job.nil?
+              scan_cfg[:n2g_drill_cfg] = drill_job
+              scan_tl[layer_key] = scan_cfg
             end
 
             stg = config["settings"] || {}
@@ -863,6 +888,7 @@ module N2G
               pocket_paths:     config["pocket_paths"] || {},
               profile_engine:   config["profile_engine"] || "legacy",
               profile_paths:    config["profile_paths"] || {},
+              tool_jobs:        tool_jobs,
               # Override điểm xuống dao thủ công (tab Xem đường dao)
               entry_overrides:  config["entry_overrides"] || {},
               # Map màu→độ dày người dùng nhập tay (khi nesting thiếu độ dày)
@@ -883,7 +909,7 @@ module N2G
             # luồng Ruby; nếu chạy ngay, overlay không kịp hiện). Giống lúc mở dialog.
             UI.start_timer(0.05, false) do
              begin
-              fresh_sheets = Scanner.scan_model(Sketchup.active_model, tl)
+              fresh_sheets = Scanner.scan_model(Sketchup.active_model, scan_tl)
               # Nếu không có sheet thì báo lỗi thay vì crash
               if fresh_sheets.nil? || fresh_sheets.empty?
                 dlg.execute_script("n2gExportDone(false)")
@@ -894,7 +920,7 @@ module N2G
               # ── Áp OVERRIDE đổi layer (từ tab Chỉnh sửa) — chỉ ảnh hưởng G-code ──
               begin
                 overrides = config["layer_overrides"] || {}
-                GcodeEngine.apply_layer_overrides!(fresh_sheets, overrides, tl) if overrides && !overrides.empty?
+                GcodeEngine.apply_layer_overrides!(fresh_sheets, overrides, scan_tl) if overrides && !overrides.empty?
               rescue => e
                 puts "N2G: apply_layer_overrides error: #{e.message}"
               end
@@ -1019,11 +1045,12 @@ module N2G
           end
         end
 
-        # Ưu tiên bản ĐÓNG GÓI (dialog_assets — JS/CSS/HTML gộp & obfuscate).
-        # File này (dù .rb hay .rbe) do loader.rb tự nạp cùng các module khác,
-        # nên ở đây chỉ cần kiểm tra module đã tồn tại chưa. Không có → đọc dialog.html.
+        # Development phải nạp dialog.html + các file JS rời để thay đổi
+        # mã có hiệu lực ngay, không bị dialog_assets.rb cũ che khuất.
+        # Production không có MODE_DEV nên vẫn dùng bản đóng gói như cũ.
         loaded_assets = false
-        if defined?(N2G::ExportGcode::DialogAssets)
+        use_dev_sources = defined?(N2G::MODE_DEV) && N2G::MODE_DEV && File.exist?(html_path)
+        if !use_dev_sources && defined?(N2G::ExportGcode::DialogAssets)
           begin
             dlg.set_html(N2G::ExportGcode::DialogAssets.html)
             loaded_assets = true

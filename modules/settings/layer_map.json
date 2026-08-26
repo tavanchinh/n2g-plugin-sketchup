@@ -97,7 +97,7 @@
     "direction": "in_out"
   },
   {
-    "layer": "ABF_MA",
+    "layer": "LA_INOX",
     "name": "T1 D6",
     "diameter": 6,
     "type": "pocket",

@@ -277,8 +277,59 @@ function pocketContourRingsClipper(loop, halfD, stepover, maxRings){
   if(verts.length>3 && Math.hypot(verts[0].x-verts[verts.length-1].x,verts[0].y-verts[verts.length-1].y)<1e-6) verts.pop();
   var area=polySignedAreaJS(verts); if(Math.abs(area)<1e-6) return [];
   var path=verts.map(function(p){return {X:Math.round(p.x*scale),Y:Math.round(p.y*scale)};});
-  var rings=[], off=halfD, lim=maxRings||500;
+  var rings=[], cleanupRuns=[], off=halfD, lim=maxRings||500;
   var lastGoodOff=null;
+  var splitMode=false;
+
+  // Add a medial cleanup line when two opposite tool-centre segments leave a
+  // narrow corridor wider than the cutter but no wider than two stepovers.
+  // Polygon offset alone loses this centreline when that corridor collapses.
+  function collectNarrowCorridorCenters(solution){
+    var minGap=halfD*2+0.05;
+    var maxGap=stepover*2+0.25;
+    solution.forEach(function(poly){
+      if(!poly || poly.length<4) return;
+      for(var i=0;i<poly.length;i++){
+        var a=poly[i],b=poly[(i+1)%poly.length];
+        var ax=a.X/scale,ay=a.Y/scale,bx=b.X/scale,by=b.Y/scale;
+        var dx=bx-ax,dy=by-ay,len=Math.hypot(dx,dy);
+        if(len<halfD*2) continue;
+        var ux=dx/len,uy=dy/len,nx=-uy,ny=ux;
+        var aT=ax*ux+ay*uy,bT=bx*ux+by*uy;
+        var lo1=Math.min(aT,bT),hi1=Math.max(aT,bT),s1=ax*nx+ay*ny;
+        for(var j=i+2;j<poly.length;j++){
+          if(i===0 && j===poly.length-1) continue;
+          var c=poly[j],e=poly[(j+1)%poly.length];
+          var cx=c.X/scale,cy=c.Y/scale,ex=e.X/scale,ey=e.Y/scale;
+          var edx=ex-cx,edy=ey-cy,elen=Math.hypot(edx,edy);
+          if(elen<halfD*2) continue;
+          var dot=(edx/elen)*ux+(edy/elen)*uy;
+          if(dot>-0.995) continue; // opposite parallel boundary only
+          var cT=cx*ux+cy*uy,eT=ex*ux+ey*uy;
+          var ov0=Math.max(lo1,Math.min(cT,eT));
+          var ov1=Math.min(hi1,Math.max(cT,eT));
+          var overlap=ov1-ov0;
+          if(overlap<halfD*2) continue;
+          var s2=cx*nx+cy*ny,gap=Math.abs(s2-s1);
+          if(gap<=minGap || gap>maxGap) continue;
+          // Trim ends by cutter radius; surrounding contour already clears
+          // the two end caps and this avoids extending through a corner.
+          var t0=ov0+halfD,t1=ov1-halfD;
+          if(t1-t0<0.5){t0=ov0;t1=ov1;}
+          var sm=(s1+s2)/2;
+          var p0={x:ux*t0+nx*sm,y:uy*t0+ny*sm};
+          var p1={x:ux*t1+nx*sm,y:uy*t1+ny*sm};
+          var key=[Math.round(((p0.x+p1.x)/2)*10),Math.round(((p0.y+p1.y)/2)*10),
+            Math.round(Math.abs(ux)*100),Math.round(Math.abs(uy)*100)].join('|');
+          if(cleanupRuns.some(function(r){return r._corridorKey===key;})) continue;
+          var run=[p0,p1];
+          run._breakBefore=true;
+          run._corridorKey=key;
+          cleanupRuns.push(run);
+        }
+      }
+    });
+  }
 
   function ringSolutionAt(distance){
     var co=new ClipperLib.ClipperOffset(2,0.25*scale);
@@ -294,9 +345,14 @@ function pocketContourRingsClipper(loop, halfD, stepover, maxRings){
 
   function appendSolution(solution){
     var added=0;
+    // Once an inward offset splits, its polygons are disconnected machining
+    // components. Shrinking cannot safely reconnect them, so every following
+    // ring starts at Safe Z. This prevents cross-component G1 moves.
+    if(solution.length>1) splitMode=true;
     solution.forEach(function(poly){
       var pts=poly.map(function(p){return {x:p.X/scale,y:p.Y/scale};});
       pts.push({x:pts[0].x,y:pts[0].y});
+      if(splitMode && rings.length>0) pts._breakBefore=true;
       rings.push(pts); added++;
     });
     return added;
@@ -319,15 +375,22 @@ function pocketContourRingsClipper(loop, halfD, stepover, maxRings){
             hi=mid;
           }
         }
-        var minLastStep=Math.max(stepover*0.25,0.5);
-        if(bestSolution && bestOff-lastGoodOff>=minLastStep) appendSolution(bestSolution);
+        // Last +1 is topology-sensitive: after a concave region splits, even
+        // a small offset delta can create the centre path that clears the
+        // remaining strip. Use only a geometric noise floor, not a fraction
+        // of stepover; a valid final delta can be well below one millimetre.
+        var minLastStep=0.25;
+        var inserted=!!(bestSolution && bestOff-lastGoodOff>=minLastStep);
+        if(inserted) appendSolution(bestSolution);
       }
       break;
     }
+    collectNarrowCorridorCenters(solution);
     if(!appendSolution(solution)) break;
     lastGoodOff=off;
     off+=stepover;
   }
+  rings=rings.concat(cleanupRuns);
   return rings;
 }
 
@@ -817,6 +880,47 @@ function islandClearingRuns(islandLoop, outerLoop, halfD, stepover, maxRings){
 // để có thể chuyển engine khi cần kiểm tra hồi quy.
 // Sinh contour từ island ra ngoài: outer co vào halfD, island nở từ halfD theo
 // stepover, sau đó cắt trong vùng outer an toàn.
+// Mark transitions that cannot be traversed at cutting Z. This also covers
+// curved outer boundaries, where clipping creates disconnected open runs.
+function markUnsafePocketConnectorsJS(runs,outerLoop,islandLoops,halfD){
+  if(!runs || runs.length<2 || !outerLoop || outerLoop.length<3) return runs||[];
+  var outerVerts=outerLoop.map(function(e){return {x:e.x1,y:e.y1};});
+  var islandVerts=(islandLoops||[]).map(function(loop){
+    return loop.map(function(e){return {x:e.x1,y:e.y1};});
+  });
+  function safePoint(p){
+    if(!_pointInPolyJS(p.x,p.y,outerVerts)) return false;
+    if(_minDistToPolyJS(p.x,p.y,outerVerts)<halfD-0.05) return false;
+    for(var ii=0;ii<islandVerts.length;ii++){
+      var poly=islandVerts[ii];
+      if(_pointInPolyJS(p.x,p.y,poly)) return false;
+      if(_minDistToPolyJS(p.x,p.y,poly)<halfD-0.05) return false;
+    }
+    return true;
+  }
+  function safeSegment(a,b){
+    if(!a||!b) return false;
+    var len=Math.hypot(b.x-a.x,b.y-a.y);
+    if(len<0.001) return true;
+    var sampleStep=Math.max(0.1,Math.min(0.5,halfD*0.2));
+    var steps=Math.max(2,Math.ceil(len/sampleStep));
+    for(var si=0;si<=steps;si++){
+      var t=si/steps;
+      if(!safePoint({x:a.x+(b.x-a.x)*t,y:a.y+(b.y-a.y)*t})) return false;
+    }
+    return true;
+  }
+  for(var ri=1;ri<runs.length;ri++){
+    var a=(runs[ri-1].pts||[]),b=(runs[ri].pts||[]);
+    // Check both execution orders. Ruby reverses the run list for in_out but
+    // intentionally preserves each contour's cutting direction.
+    var safeForward=safeSegment(a[a.length-1],b[0]);
+    var safeReverse=safeSegment(b[b.length-1],a[0]);
+    runs[ri].breakBefore=(runs[ri].breakBefore===true)||!safeForward||!safeReverse;
+  }
+  return runs;
+}
+
 function islandClearingRunsClipper(islandLoops, outerLoop, halfD, stepover, maxRings){
   var runs=[];
   if(typeof ClipperLib==='undefined' || !outerLoop || outerLoop.length<3 ||
@@ -878,12 +982,45 @@ function islandClearingRunsClipper(islandLoops, outerLoop, halfD, stepover, maxR
     return cx>=safeCx ? 2 : 3;
   }
 
+  function clippedAtDistance(distance){
+    var expanded=offsetPaths(islandPaths,distance);
+    if(!expanded.length) return [];
+    return clipContourLines(unionPaths(expanded),safeOuter);
+  }
+  function collectClipped(clipped,passValue){
+    clipped.forEach(function(line){
+      var pts=line.map(function(p){return {x:p.X/scale,y:p.Y/scale};});
+      var closed=pts.length>2 && Math.hypot(pts[0].x-pts[pts.length-1].x,pts[0].y-pts[pts.length-1].y)<0.002;
+      if(closed) pts[pts.length-1]={x:pts[0].x,y:pts[0].y};
+      var run={closed:closed,pts:pts};
+      if(closed){
+        closedRuns.push(run);
+      }else{
+        cornerRuns.push({run:run,corner:cornerIndex(pts),pass:passValue,seq:runSeq++});
+      }
+    });
+  }
+
+  var lastContourD=null;
   for(var pass=0;pass<lim;pass++){
-    var expanded=offsetPaths(islandPaths,d);
-    if(!expanded.length) break;
-    expanded=unionPaths(expanded);
-    var clipped=clipContourLines(expanded,safeOuter);
+    var clipped=clippedAtDistance(d);
     if(!clipped.length){
+      // Last +1 for an island pocket. When the next stepover makes offset
+      // fronts merge/disappear, add one contour halfway to the last surviving
+      // position so a narrow strip is not left between opposing toolpaths.
+      if(lastContourD!==null){
+        var lo=lastContourD,hi=d,bestD=null;
+        for(var bi=0;bi<12;bi++){
+          var probe=(lo+hi)/2;
+          if(clippedAtDistance(probe).length){bestD=probe;lo=probe;}
+          else hi=probe;
+        }
+        if(bestD!==null && bestD-lastContourD>=Math.max(stepover*0.25,0.5)){
+          var lastPlusD=(lastContourD+bestD)/2;
+          var lastPlus=clippedAtDistance(lastPlusD);
+          if(lastPlus.length) collectClipped(lastPlus,pass-0.5);
+        }
+      }
       // Island đã nở phủ qua toàn bộ safe outer: chạy biên outer an toàn đúng
       // một lần để dọn các góc còn lại, rồi kết thúc.
       safeOuter.forEach(function(poly){
@@ -894,23 +1031,55 @@ function islandClearingRunsClipper(islandLoops, outerLoop, halfD, stepover, maxR
       break;
     }
 
-    clipped.forEach(function(line){
-      var pts=line.map(function(p){return {x:p.X/scale,y:p.Y/scale};});
-      var closed=pts.length>2 && Math.hypot(pts[0].x-pts[pts.length-1].x,pts[0].y-pts[pts.length-1].y)<0.002;
-      if(closed) pts[pts.length-1]={x:pts[0].x,y:pts[0].y};
-      var run={closed:closed,pts:pts};
-      if(closed){
-        closedRuns.push(run);
-      }else{
-        cornerRuns.push({run:run,corner:cornerIndex(pts),pass:pass,seq:runSeq++});
-      }
-    });
+    collectClipped(clipped,pass);
+    lastContourD=d;
     d+=stepover;
   }
   // Xử lý hết mọi offset của một góc rồi mới chuyển sang góc kế tiếp.
   // Trong mỗi góc giữ thứ tự island → outer (pass tăng dần).
   cornerRuns.sort(function(a,b){return a.corner-b.corner || a.pass-b.pass || a.seq-b.seq;});
+  // Runs belonging to different corners are disconnected machining zones.
+  // Never traverse from one corner to another at cutting Z.
+  for(var ci=1;ci<cornerRuns.length;ci++){
+    if(cornerRuns[ci-1].corner!==cornerRuns[ci].corner){
+      cornerRuns[ci].run.breakBefore=true;
+    }
+  }
   runs=closedRuns.concat(cornerRuns.map(function(item){return item.run;}),finishRuns);
+
+  // Validate every at-depth connector against the tool-centre safe region.
+  // Unsafe transitions are marked; tp-pocket keeps the existing JSON shape by
+  // serializing the mark as an empty run (a Safe-Z separator for Ruby).
+  var safeIslands=offsetPaths(islandPaths,halfD);
+  function pointInAnyPath(pt,paths,allowBoundary){
+    var ip={X:Math.round(pt.x*scale),Y:Math.round(pt.y*scale)};
+    for(var pi=0;pi<paths.length;pi++){
+      var hit=ClipperLib.Clipper.PointInPolygon(ip,paths[pi]);
+      if(hit===1 || (allowBoundary && hit===-1)) return true;
+    }
+    return false;
+  }
+  function connectorIsSafe(a,b){
+    if(!a || !b) return false;
+    var len=Math.hypot(b.x-a.x,b.y-a.y);
+    if(len<0.001) return true;
+    var sampleStep=Math.max(0.1,Math.min(0.5,halfD*0.2));
+    var steps=Math.max(2,Math.ceil(len/sampleStep));
+    for(var si=0;si<=steps;si++){
+      var t=si/steps;
+      var p={x:a.x+(b.x-a.x)*t,y:a.y+(b.y-a.y)*t};
+      if(!pointInAnyPath(p,safeOuter,true)) return false;
+      // Tangency to the expanded island is allowed; its interior is not.
+      if(pointInAnyPath(p,safeIslands,false)) return false;
+    }
+    return true;
+  }
+  for(var ri=1;ri<runs.length;ri++){
+    var prevPts=runs[ri-1].pts||[], nextPts=runs[ri].pts||[];
+    var safeForward=connectorIsSafe(prevPts[prevPts.length-1],nextPts[0]);
+    var safeReverse=connectorIsSafe(nextPts[nextPts.length-1],prevPts[0]);
+    runs[ri].breakBefore=(runs[ri].breakBefore===true)||!safeForward||!safeReverse;
+  }
   // maxRings chỉ là chốt an toàn. Không tự thêm outer khi dừng bởi giới hạn vì
   // như vậy có thể tạo một bước nhảy lớn qua vùng chưa vét.
   return runs;

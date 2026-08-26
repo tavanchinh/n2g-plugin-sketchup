@@ -511,7 +511,10 @@ module N2G
           next if matched.empty?
 
           norm_to = normalize_layer(to_layer)
-          to_is_drill = tl[norm_to] && tl[norm_to][:type] == :drill
+          to_cfg = tl[norm_to]
+          to_has_drill = to_cfg && (to_cfg[:type] == :drill || to_cfg[:n2g_has_drill] == true)
+          to_has_non_drill = to_cfg && (to_cfg[:type] != :drill || to_cfg[:n2g_has_non_drill] == true)
+          to_is_drill = to_has_drill
 
           if to_is_drill && o_kind != "drill"
             # Hình (đường) → khoan tại TÂM: xóa các edge hình, thêm 1 điểm khoan tại tâm bbox.
@@ -521,13 +524,15 @@ module N2G
             cy = (ys.min + ys.max) / 2.0
             pid = matched.map { |e| e[:part_id] }.compact.first
             gid = matched.map { |e| e[:group_id] }.compact.first
-            dia = (tl[norm_to] && tl[norm_to][:diameter]) || 5.0
+            drill_cfg = (to_cfg && to_cfg[:n2g_drill_cfg]) || to_cfg
+            dia = (drill_cfg && drill_cfg[:diameter]) || 5.0
             # xóa edge cũ
-            matched.each { |e| edges.delete(e) }
+            matched.each { |e| edges.delete(e) } unless to_has_non_drill
+            matched.each { |e| e[:layer] = to_layer } if to_has_non_drill
             # thêm điểm khoan (drill center): x1=x2=cx, y1=y2=cy
             edges << {
               x1: cx, y1: cy, x2: cx, y2: cy,
-              color: (tl[norm_to] && tl[norm_to][:color]) || "#e07b00",
+              color: (drill_cfg && drill_cfg[:color]) || "#e07b00",
               layer: to_layer, is_drill_center: true,
               diameter: dia, group_id: gid, part_id: pid
             }
@@ -930,6 +935,9 @@ module N2G
       #     chữ nhật trơn phủ kín (~1.0) → không phải.
       def self.detect_dogbone(loop_pts, half_d)
         return nil if loop_pts.nil? || loop_pts.size < 4 || half_d <= 0
+        # Khớp JS: dogbone thật có đỉnh lõm ở chỗ tai relief nối với thân.
+        # Loại polygon hoàn toàn lồi như chữ nhật bo góc khỏi nhánh dogbone.
+        return nil unless is_concave?(loop_pts)
         xs = loop_pts.map { |p| p[:x] }
         ys = loop_pts.map { |p| p[:y] }
         bw = xs.max - xs.min
@@ -977,6 +985,29 @@ module N2G
         xs = loop_pts.map { |p| p[:x] }
         ys = loop_pts.map { |p| p[:y] }
         x0, x1, y0, y1 = xs.min, xs.max, ys.min, ys.max
+
+        # Khớp JS: các đỉnh lõm nối tai relief phải nằm gần hai đầu trục dài.
+        # Loại các polygon có khấc lớn nằm giữa chi tiết nhưng vô tình đạt coverage.
+        signed_area = 0.0
+        loop_pts.size.times do |i|
+          j = (i + 1) % loop_pts.size
+          signed_area += loop_pts[i][:x] * loop_pts[j][:y] - loop_pts[j][:x] * loop_pts[i][:y]
+        end
+        area_sign = signed_area >= 0 ? 1.0 : -1.0
+        reflex_count = 0
+        end_tol = [half_d * 3.0, 1.0].max
+        loop_pts.size.times do |i|
+          a = loop_pts[(i - 1) % loop_pts.size]
+          b = loop_pts[i]
+          c = loop_pts[(i + 1) % loop_pts.size]
+          cross = (b[:x] - a[:x]) * (c[:y] - b[:y]) - (b[:y] - a[:y]) * (c[:x] - b[:x])
+          next unless cross * area_sign < -1e-7
+          reflex_count += 1
+          lc = long_is_x ? b[:x] : b[:y]
+          l0, l1 = long_is_x ? [x0, x1] : [y0, y1]
+          return nil if [(lc - l0).abs, (l1 - lc).abs].min > end_tol
+        end
+        return nil if reflex_count < 2
 
         if long_is_x
           bx0, bx1 = x0 + half_d, x1 - half_d
@@ -1734,7 +1765,9 @@ module N2G
           if flipped || grew || self_crossed || has_outside || too_close
             if !last_good_off.nil? && (off - last_good_off) > stepover*0.5 + 1e-6
               mid = largest_valid_offset_ring(work, last_good_off, off, base_sign, prev_abs, base_verts, half_d)
-              if mid && mid[:ring] && (mid[:off] - last_good_off) >= [stepover*0.25, 0.5].max
+              # Khớp JS: sau khi vùng lõm tách topology, dù delta offset nhỏ
+              # contour cuối vẫn có thể là đường tâm cần thiết để vét kín.
+              if mid && mid[:ring] && (mid[:off] - last_good_off) >= 0.25
                 ring = mid[:ring].dup
                 ring << { x: mid[:ring][0][:x], y: mid[:ring][0][:y] }
                 rings << ring
@@ -2534,22 +2567,46 @@ module N2G
         started = false
         groups.each do |group_runs|
           runs = cfg[:direction].to_s == 'in_out' ? group_runs.reverse : group_runs
-          valid_runs = runs.map do |run|
-            run.map { |p| { x: (p['x'] || p[:x]).to_f, y: (p['y'] || p[:y]).to_f } }
-          end.select { |pts| pts.size >= 2 }
-          next if valid_runs.empty?
+          parsed_runs = runs.map do |run|
+            (run || []).map { |p| { x: (p['x'] || p[:x]).to_f, y: (p['y'] || p[:y]).to_f } }
+          end
+          next unless parsed_runs.any? { |pts| pts.size >= 2 }
 
-          # A group is one Pocket region. Raise only when changing region;
-          # consecutive offsets in this group remain at cutting Z.
+          # A group is one Pocket region. Consecutive safe offsets remain at
+          # cutting Z; an empty run is a JS-authored Safe-Z separator.
           if started
             f.puts "G0 Z#{format('%.1f', clear_z)}"
             state[:z] = clear_z
           end
-          valid_runs.each_with_index do |pts, ri|
-            if ri == 0
+          at_cut_z = false
+          parsed_runs.each do |pts|
+            if pts.size < 2
+              if at_cut_z
+                f.puts "G0 Z#{format('%.1f', clear_z)}"
+                state[:z] = clear_z
+                at_cut_z = false
+              end
+              next
+            end
+            # Final safety gate after applying the real in_out/out_in order.
+            # Never emit a long cross-region connector as G1, even if JS data
+            # did not contain a Safe-Z marker.
+            if at_cut_z
+              connector_len = Math.hypot(pts.first[:x] - state[:x].to_f,
+                                         pts.first[:y] - state[:y].to_f)
+              step_abs = cfg[:diameter].to_f * (cfg[:stepover].to_f.nonzero? || 90.0) / 100.0
+              max_connector = [step_abs * 1.5, cfg[:diameter].to_f * 1.25, 1.0].max
+              if connector_len > max_connector
+                f.puts "G0 Z#{format('%.1f', clear_z)}"
+                state[:z] = clear_z
+                at_cut_z = false
+              end
+            end
+            unless at_cut_z
               state[:z] = clear_z
               f.puts gcode_line('G0', x: pts[0][:x], y: pts[0][:y], state: state)
               f.puts gcode_line('G1', z: depth, f: z_feed, state: state)
+              at_cut_z = true
             else
               f.puts gcode_line('G1', x: pts[0][:x], y: pts[0][:y], f: feed, state: state)
             end
