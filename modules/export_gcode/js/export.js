@@ -372,7 +372,13 @@ function n2gSelectedText(selectId){
   return txt;
 }
 
+var _n2gExportInFlight = false;
+
 function doExport(){
+  // UI.messagebox của SketchUp vẫn xử lý event khi đang mở. Chặn callback
+  // lặp gửi thêm yêu cầu xuất và tạo nhiều hộp cảnh báo lồng nhau.
+  if(_n2gExportInFlight) return;
+  _n2gExportInFlight = true;
   setStatus('busy', 'Đang xuất G-code...');
   // Overlay đã hiện từ confirmAndExport. Đảm bảo vẫn hiện (phòng đường gọi khác).
   var _ov = document.getElementById('overlay');
@@ -384,6 +390,7 @@ function doExport(){
 
 function n2gBuildPocketPathsForExport(){
   var out={};
+  _n2gPocketExportWarnings=[];
   if(typeof SHEETS==='undefined' || typeof drawToolpathPocket!=='function') return out;
   SHEETS.forEach(function(sheet){
     (TOOLS||[]).filter(function(tool){return tool.type==='pocket';}).forEach(function(tool){
@@ -396,7 +403,14 @@ function n2gBuildPocketPathsForExport(){
       var ctx=cv.getContext('2d');
       tpRenderedPaths=[];
       drawToolpathPocket(ctx,vecs,tool,function(x){return x;},function(y){return y;},1,1);
-      out[sheet.name+'::'+tool.layer]=tpRenderedPaths.filter(function(p){return p.type==='pocket';}).map(function(p){
+      var rendered=tpRenderedPaths.filter(function(p){return p.type==='pocket';});
+      var computedEmpty=rendered.length===0 || rendered.every(function(p){
+        return Array.isArray(p.runs) && p.runs.every(function(run){return Array.isArray(run) && run.length===0;});
+      });
+      if(computedEmpty){
+        _n2gPocketExportWarnings.push({sheet:sheet.name,layer:tool.layer,diameter:+tool.diameter||0});
+      }
+      out[sheet.name+'::'+tool.layer]=rendered.map(function(p){
         return { runs:(p.runs||[]).map(function(run){return run.map(function(q){return {x:q.x,y:q.y};});}) };
       });
     });
@@ -462,11 +476,36 @@ function n2gBuildProfilePathsForExport(){
   return out;
 }
 
-function _doExportSend(){
+var _n2gPocketExportWarnings=[];
+
+async function _doExportSend(){
   flushAll();
   var pocketPaths=n2gBuildPocketPathsForExport();
   var profileEngine=(typeof window!=='undefined' && window.N2G_PROFILE_OFFSET_ENGINE) || 'clipper';
   var profilePaths=n2gBuildProfilePathsForExport();
+  if(_n2gPocketExportWarnings.length){
+    var ov=document.getElementById('overlay'); if(ov) ov.style.display='none';
+    var rows=_n2gPocketExportWarnings.map(function(w){
+      return '<div style="margin:4px 0">• Sheet <b>'+esc(w.sheet)+'</b>, layer <b>'+esc(w.layer)+
+        '</b>, dao D'+w.diameter.toFixed(3)+' mm</div>';
+    }).join('');
+    var choice=await showGConfirm(
+      'Pocket không vừa dao',
+      'Một số vùng Pocket không tạo được đường chạy, có thể do vùng nhỏ hoặc hẹp hơn đường kính dao.'+
+      '<div style="max-height:260px;overflow:auto;margin:10px 0">'+rows+'</div>'+
+      '<span style="color:var(--text2)">Các vùng trên sẽ bị bỏ qua trong G-code.</span>',
+      [
+        {label:'Xem lại',value:'review'},
+        {label:'Vẫn tiếp tục xuất',value:'continue',kind:'primary'}
+      ],
+      'warn'
+    );
+    if(choice!=='continue'){
+      n2gExportDone(false);
+      return;
+    }
+    if(ov) ov.style.display='flex';
+  }
   sketchup.save_layer_map_callback(JSON.stringify(TOOLS));
   sketchup.export_gcode_callback(JSON.stringify({
     tools: TOOLS,
@@ -508,6 +547,7 @@ function n2gExportBusy(){
 }
 
 function n2gExportDone(ok, folder, sheetCount){
+  _n2gExportInFlight = false;
   document.getElementById('btn-export').disabled = false;
   // Tắt overlay loading (nếu đang hiện)
   var ov = document.getElementById('overlay');

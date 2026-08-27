@@ -764,6 +764,11 @@ module N2G
         end
 
         dlg.add_action_callback("export_gcode_callback") do |_, config_json|
+          if @export_gcode_busy
+            puts "N2G: bỏ qua yêu cầu xuất trùng khi một phiên xuất đang chạy"
+            next
+          end
+          @export_gcode_busy = true
           begin
             if defined?(N2G::Licenses)
               status = N2G::Licenses.check
@@ -772,6 +777,7 @@ module N2G
                 N2G::Licenses.show_activation_dialog(status)
                 # Dialog kích hoạt vừa đóng → làm mới dòng trạng thái license.
                 dlg.execute_script("if(typeof loadLicenseStatus==='function') loadLicenseStatus();")
+                @export_gcode_busy = false
                 next
               end
             end
@@ -899,6 +905,7 @@ module N2G
             out_dir = UI.select_directory(title: "Chọn thư mục lưu G-code")
             unless out_dir
               dlg.execute_script("n2gExportDone(false)")  # user huỷ chọn folder
+              @export_gcode_busy = false
               next
             end
 
@@ -994,11 +1001,14 @@ module N2G
                 dlg.execute_script("n2gExportDone(false)")
               end
              rescue => te
-              UI.messagebox("Lỗi xuất:\n#{te.message}\n#{te.backtrace.first(3).join("\n")}")
-              dlg.execute_script("n2gExportDone(false)")
+               UI.messagebox("Lỗi xuất:\n#{te.message}\n#{te.backtrace.first(3).join("\n")}")
+               dlg.execute_script("n2gExportDone(false)")
+             ensure
+               @export_gcode_busy = false
              end
             end  # UI.start_timer
           rescue => e
+            @export_gcode_busy = false
             UI.messagebox("Lỗi xuất:\n#{e.message}\n#{e.backtrace.first(3).join("\n")}")
             dlg.execute_script("n2gExportDone(false)")
           end

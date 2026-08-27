@@ -83,6 +83,23 @@
     "direction": "in_out"
   },
   {
+    "layer": "ABF_GROOVE",
+    "name": "T1D6",
+    "diameter": 6,
+    "type": "pocket",
+    "strategy": "pocket",
+    "bit_type": "flat",
+    "vbit_angle": 120,
+    "depth": 10,
+    "stepover": 90,
+    "rpm": 18000,
+    "feed": 12000,
+    "z_feed": 3000,
+    "max_depth": 20,
+    "tool_number": 1,
+    "direction": "in_out"
+  },
+  {
     "layer": "ABF_DOGBONE",
     "name": "T1 D6",
     "diameter": 6,
@@ -97,7 +114,7 @@
     "direction": "in_out"
   },
   {
-    "layer": "LA_INOX",
+    "layer": "ABF_MA",
     "name": "T1 D6",
     "diameter": 6,
     "type": "pocket",

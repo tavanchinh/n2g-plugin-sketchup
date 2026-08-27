@@ -153,9 +153,25 @@ module N2G
                     runs.all? { |run| (run.is_a?(Array) && run.empty?) || valid_run.call(run) }
             next if valid
 
+            # Khóa tồn tại + mảng rỗng: JS/Clipper đã xử lý nhưng offset
+            # không còn đường tâm dao, thường do vùng nhỏ/hẹp hơn dao.
+            # Dữ liệu thiếu hoặc sai định dạng vẫn là lỗi bắt buộc dừng.
+            key_found = pocket_paths.is_a?(Hash) &&
+                        (pocket_paths.key?(key) || pocket_paths.key?(key.to_s))
+            computed_empty = paths.is_a?(Array) && paths.all? do |path|
+              next false unless path.is_a?(Hash)
+              path_runs = path['runs'] || path[:runs]
+              path_runs.is_a?(Array) && path_runs.all? { |run| run.is_a?(Array) && run.empty? }
+            end
+            if key_found && computed_empty
+              next
+            end
+
             raise "Không có đường chạy Pocket hợp lệ từ JS/Clipper cho sheet '#{sheet[:name]}', layer '#{layer}'. Hãy mở lại giao diện và kiểm tra preview trước khi xuất."
           end
         end
+
+        true
       end
 
       def self.validate_profile_paths!(all_sheets, tool_library, app_settings)
@@ -196,7 +212,7 @@ module N2G
       end
 
       def self.generate(all_sheets, tool_library, post, app_settings={}, preselected_folder=nil)
-        validate_pocket_paths!(all_sheets, tool_library, app_settings)
+        return nil unless validate_pocket_paths!(all_sheets, tool_library, app_settings)
         validate_profile_paths!(all_sheets, tool_library, app_settings)
 
         # Nếu folder đã được chọn TRƯỚC (từ dialogs.rb, để hộp thoại mở ngay không

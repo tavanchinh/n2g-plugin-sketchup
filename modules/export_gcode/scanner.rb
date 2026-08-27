@@ -24,6 +24,41 @@ module N2G
         end
       end
 
+      # Thu thập cạnh nằm trên layer SHEETBORDER hoặc bên trong group/component
+      # có tên/layer SHEETBORDER, trong hệ tọa độ definition của chính sheet.
+      def self.sheetborder_points(entities, trans=Geom::Transformation.new, inherited_border=false, points=[])
+        entities.each do |ent|
+          if ent.is_a?(Sketchup::Group) || ent.is_a?(Sketchup::ComponentInstance)
+            tag = "#{ent.name} #{ent.layer&.name}".upcase.gsub(/[^A-Z0-9]/, '')
+            is_border = inherited_border || tag.include?('SHEETBORDER')
+            sheetborder_points(ent.definition.entities, trans * ent.transformation, is_border, points)
+          elsif ent.is_a?(Sketchup::Edge)
+            layer_norm = GcodeEngine.normalize_layer(ent.layer.name).gsub(/[^A-Z0-9]/, '')
+            if inherited_border || layer_norm.include?('SHEETBORDER')
+              points << ent.start.position.transform(trans)
+              points << ent.end.position.transform(trans)
+            end
+          end
+        end
+        points
+      end
+
+      def self.sheet_size(sheet, world_trans)
+        points = sheetborder_points(sheet.definition.entities)
+        unless points.empty?
+          world_points = points.map { |p| p.transform(world_trans) }
+          xs = world_points.map { |p| p.x.to_mm }
+          ys = world_points.map { |p| p.y.to_mm }
+          width = xs.max - xs.min
+          height = ys.max - ys.min
+          return [width, height] if width.finite? && height.finite? && width > 0.1 && height > 0.1
+        end
+        [sheet.bounds.width.to_mm, sheet.bounds.height.to_mm]
+      rescue => e
+        puts "N2G sheet_size fallback for #{sheet.name.inspect}: #{e.message}"
+        [sheet.bounds.width.to_mm, sheet.bounds.height.to_mm]
+      end
+
       # Nhận diện group là drill circle bằng heuristic chặt:
       # - Edges >= 12 (vòng tròn ABF thường có 24 đoạn)
       # - Đường kính hợp lý 2–150mm
@@ -445,9 +480,17 @@ module N2G
           else
             []
           end
-          valid_local_dims = local_scaled_dims.select { |v| v.finite? && v > 0.001 }
-          thickness_source = valid_local_dims.empty? ? world_dims : valid_local_dims
-          thick = thickness_source.min.round(1)
+          # Cả world bounds và definition bounds đều là AABB nên một trong hai
+          # có thể bị phình khi instance hoặc geometry con bị xoay. Không ưu
+          # tiên cố định một hệ; lấy ứng viên nhỏ nhất từ cả hai hệ.
+          # Ví dụ đã gặp:
+          #   world  [76.675, 327.146, 747], local [329.399, 17.5, 747] -> 17.5
+          #   world  [17.4, 304, 202.4],      local [66, 504.64, 616]    -> 17.4
+          valid_thickness_dims = (world_dims + local_scaled_dims).select do |v|
+            v.finite? && v > 0.001
+          end
+          next if valid_thickness_dims.empty?
+          thick = valid_thickness_dims.min.round(1)
           next if thick <= 0
 
           # Material: của group (nếu tên thật); nếu không thì tìm ĐỆ QUY vào face/con.
@@ -591,12 +634,13 @@ module N2G
           add_stray_drill_centers(stray, clean, disp)
           merge_layer0_edges(clean)
           merge_layer0_edges(disp)
+          sheet_width, sheet_height = sheet_size(sheet, world_trans)
           {
             name:    sheet.name.gsub(/^_+/, ""),
             vectors: clean,
             display: disp,
-            width:   sheet.bounds.width.to_mm,
-            height:  sheet.bounds.height.to_mm
+            width:   sheet_width,
+            height:  sheet_height
           }
         end
 
