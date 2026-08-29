@@ -420,6 +420,7 @@ function n2gBuildPocketPathsForExport(){
 
 function n2gBuildProfilePathsForExport(){
   var out={};
+  _n2gProfileExportWarnings=[];
   var engine=(typeof window!=='undefined' && window.N2G_PROFILE_OFFSET_ENGINE) || 'clipper';
   if(engine==='legacy' || typeof SHEETS==='undefined' || typeof profileOffsetClipper!=='function') return out;
   SHEETS.forEach(function(sheet){
@@ -467,6 +468,23 @@ function n2gBuildProfilePathsForExport(){
             }
           }
         }
+        if(strategy==='cut_out' && loop._closed && !circ &&
+           typeof profileHasMicroDetourJS==='function' && profileHasMicroDetourJS(loop,+tool.diameter||0)){
+          var legacyRun=offsetPolygonMiter(loop,-((+tool.diameter||0)/2),true);
+          var currentRuns=(mode==='clipper'||mode==='js_offset')?runs:[legacyRun];
+          var currentSafe=typeof profileCutOutRunSafeJS!=='function' ||
+            (currentRuns.length>0 && currentRuns.every(function(run){
+              return profileCutOutRunSafeJS(loop,run,(+tool.diameter||0)/2);
+            }));
+          if(!currentSafe){
+            runs=profileSafeCutOutClipperJS(loop,(+tool.diameter||0)/2);
+            if(runs.length){ mode='clipper'; }
+            else{
+              mode='skip'; runs=[];
+              _n2gProfileExportWarnings.push({sheet:sheet.name,layer:tool.layer,diameter:+tool.diameter||0});
+            }
+          }
+        }
         records.push({id:profileLoopIdJS(loop),key:profileLoopKeyJS(loop),strategy:strategy,
           mode:mode,runs:(mode==='clipper'||mode==='js_offset')?runs:[]});
       });
@@ -477,21 +495,26 @@ function n2gBuildProfilePathsForExport(){
 }
 
 var _n2gPocketExportWarnings=[];
+var _n2gProfileExportWarnings=[];
 
 async function _doExportSend(){
   flushAll();
   var pocketPaths=n2gBuildPocketPathsForExport();
   var profileEngine=(typeof window!=='undefined' && window.N2G_PROFILE_OFFSET_ENGINE) || 'clipper';
   var profilePaths=n2gBuildProfilePathsForExport();
-  if(_n2gPocketExportWarnings.length){
+  if(_n2gPocketExportWarnings.length || _n2gProfileExportWarnings.length){
     var ov=document.getElementById('overlay'); if(ov) ov.style.display='none';
     var rows=_n2gPocketExportWarnings.map(function(w){
       return '<div style="margin:4px 0">• Sheet <b>'+esc(w.sheet)+'</b>, layer <b>'+esc(w.layer)+
         '</b>, dao D'+w.diameter.toFixed(3)+' mm</div>';
     }).join('');
+    rows+=_n2gProfileExportWarnings.map(function(w){
+      return '<div style="margin:4px 0">• Sheet <b>'+esc(w.sheet)+'</b>, layer <b>'+esc(w.layer)+
+        '</b>, dao D'+w.diameter.toFixed(3)+' mm — bỏ qua Profile không an toàn</div>';
+    }).join('');
     var choice=await showGConfirm(
-      'Pocket không vừa dao',
-      'Một số vùng Pocket không tạo được đường chạy, có thể do vùng nhỏ hoặc hẹp hơn đường kính dao.'+
+      'Chi tiết không phù hợp với dao',
+      'Một số vùng không tạo được đường chạy an toàn với đường kính dao hiện tại.'+
       '<div style="max-height:260px;overflow:auto;margin:10px 0">'+rows+'</div>'+
       '<span style="color:var(--text2)">Các vùng trên sẽ bị bỏ qua trong G-code.</span>',
       [

@@ -2938,6 +2938,20 @@ module N2G
                 expanded_loops << lp.merge(_n2g_island:is_isl)
                 next
               end
+              # JS có thể loại một loop rác cực nhỏ trước khi tạo record (ví dụ
+              # bbox 0.117 x 0.350 mm với dao D6), trong khi Ruby build_loops vẫn
+              # giữ lại. Không được fallback offset hoặc phát G-code cho loop mà
+              # dao không thể chứa; bỏ qua an toàn khi người dùng tiếp tục xuất.
+              # Loop đủ kích thước nhưng mất record vẫn là lỗi cứng như trước.
+              if profile_layer.upcase.gsub(/[^A-Z0-9]/, '').include?('CUTTINGLINES') && lp[:closed]
+                geom = profile_loop_geometry(lp[:edges])
+                if geom
+                  loop_w = (geom[2] - geom[1]).abs
+                  loop_h = (geom[4] - geom[3]).abs
+                  tool_d = cfg[:diameter].to_f.abs
+                  next if tool_d > 0.0 && [loop_w, loop_h].min < tool_d - 0.001
+                end
+              end
               raise "Không ghép được Profile JS cho sheet '#{sheet_name}', layer '#{profile_layer}', loop '#{stable_id}'."
             elsif mode == 'skip'
               # Preview JS xac dinh tam dao khong con vung hop le (island qua nho).

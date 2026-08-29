@@ -454,6 +454,251 @@ function profileOffsetClipper(loop, halfD, strategy){
   return profileNarrowSlotReliefJS(loop,runs,halfD,strategy);
 }
 
+function profileCutOutRunSafeJS(loop,run,halfD){
+  if(!loop||loop.length<3||!run||run.length<3) return false;
+  var tol=Math.max(0.05,Math.abs(halfD)*0.02), minClear=Math.max(0,Math.abs(halfD)-tol);
+  var src=loop.map(function(e){return{x:+e.x1,y:+e.y1};});
+  function orient(a,b,c){return (b.x-a.x)*(c.y-a.y)-(b.y-a.y)*(c.x-a.x);}
+  function onSeg(a,b,p){return p.x>=Math.min(a.x,b.x)-1e-7&&p.x<=Math.max(a.x,b.x)+1e-7&&p.y>=Math.min(a.y,b.y)-1e-7&&p.y<=Math.max(a.y,b.y)+1e-7;}
+  function intersects(a,b,c,d){
+    var o1=orient(a,b,c),o2=orient(a,b,d),o3=orient(c,d,a),o4=orient(c,d,b);
+    if(((o1>1e-8&&o2< -1e-8)||(o1< -1e-8&&o2>1e-8))&&((o3>1e-8&&o4< -1e-8)||(o3< -1e-8&&o4>1e-8))) return true;
+    return (Math.abs(o1)<=1e-8&&onSeg(a,b,c))||(Math.abs(o2)<=1e-8&&onSeg(a,b,d))||
+           (Math.abs(o3)<=1e-8&&onSeg(c,d,a))||(Math.abs(o4)<=1e-8&&onSeg(c,d,b));
+  }
+  function pointSeg(p,a,b){
+    var dx=b.x-a.x,dy=b.y-a.y,l2=dx*dx+dy*dy;
+    if(l2<1e-12) return Math.hypot(p.x-a.x,p.y-a.y);
+    var t=Math.max(0,Math.min(1,((p.x-a.x)*dx+(p.y-a.y)*dy)/l2));
+    return Math.hypot(p.x-(a.x+t*dx),p.y-(a.y+t*dy));
+  }
+  function segDist(a,b,c,d){
+    if(intersects(a,b,c,d)) return 0;
+    return Math.min(pointSeg(a,c,d),pointSeg(b,c,d),pointSeg(c,a,b),pointSeg(d,a,b));
+  }
+  var n=run.length;
+  for(var i=0;i<n;i++){
+    var a=run[i],b=run[(i+1)%n];
+    var mid={x:(a.x+b.x)/2,y:(a.y+b.y)/2};
+    if(_pointInPolyJS(mid.x,mid.y,src)) return false;
+    for(var j=0;j<loop.length;j++){
+      var c={x:+loop[j].x1,y:+loop[j].y1},d={x:+loop[j].x2,y:+loop[j].y2};
+      if(segDist(a,b,c,d)<minClear) return false;
+    }
+    for(var k=i+1;k<n;k++){
+      if(k===i+1||(i===0&&k===n-1)) continue;
+      if(intersects(a,b,run[k],run[(k+1)%n])) return false;
+    }
+  }
+  return true;
+}
+
+function profileHasMicroDetourJS(loop,toolD){
+  if(!loop||loop.length<4||!loop._closed||!(toolD>0)) return false;
+  var tol=Math.max(0.05,toolD*0.02),n=loop.length;
+  var lens=loop.map(function(e){return Math.hypot(e.x2-e.x1,e.y2-e.y1);});
+  for(var i=0;i<n;i++){
+    if(lens[i]>toolD+tol) continue;
+    var pi=(i-1+n)%n,ni=(i+1)%n;
+    if(lens[pi]>toolD+tol&&lens[ni]>toolD+tol) continue;
+    var a=loop[pi],b=loop[i],c=loop[ni];
+    var ax=a.x2-a.x1,ay=a.y2-a.y1,bx=b.x2-b.x1,by=b.y2-b.y1,cx=c.x2-c.x1,cy=c.y2-c.y1;
+    var al=Math.hypot(ax,ay),bl=Math.hypot(bx,by),cl=Math.hypot(cx,cy);
+    if(al<1e-8||bl<1e-8||cl<1e-8) continue;
+    var turn1=Math.abs((ax*by-ay*bx)/(al*bl));
+    var turn2=Math.abs((bx*cy-by*cx)/(bl*cl));
+    if(turn1>0.15||turn2>0.15) return true;
+  }
+  return false;
+}
+
+function profileRawCutOutClipperJS(loop,halfD){
+  if(typeof ClipperLib==='undefined'||!loop||loop.length<3) return [];
+  var scale=1000,path=loop.map(function(e){return{X:Math.round(e.x1*scale),Y:Math.round(e.y1*scale)};}),out=[];
+  // ArcTolerance 0.02 mm: dây cung của jtRound không được lẹm đáng kể vào
+  // vòng clearance D/2. Chỉ chạy cho loop micro đã phát hiện.
+  var co=new ClipperLib.ClipperOffset(2,0.02*scale);
+  // Chỉ dùng cho micro-detour cut_out: round join tạo đường vòng ngoài theo
+  // bán kính dao, tránh miter sụp giữ một điểm tâm dao ngay trên vector.
+  co.AddPath(path,ClipperLib.JoinType.jtRound,ClipperLib.EndType.etClosedPolygon);
+  co.Execute(out,Math.abs(halfD)*scale);
+  return out.filter(function(poly){return poly&&poly.length>=3&&Math.abs(ClipperLib.Clipper.Area(poly))>=10;})
+    .map(function(poly){return poly.map(function(p){return{x:p.X/scale,y:p.Y/scale};});});
+}
+
+function profileCleanedCutOutClipperJS(loop,halfD){
+  if(typeof ClipperLib==='undefined'||!loop||loop.length<3)return [];
+  var scale=1000,path=loop.map(function(e){return{X:Math.round(e.x1*scale),Y:Math.round(e.y1*scale)};});
+  var cleanTol=Math.min(0.5,Math.max(0.15,Math.abs(halfD)*0.15))*scale;
+  var cleaned=ClipperLib.Clipper.CleanPolygon(path,cleanTol),out=[];
+  if(!cleaned||cleaned.length<3)return [];
+  var co=new ClipperLib.ClipperOffset(2,0.02*scale);
+  co.AddPath(cleaned,ClipperLib.JoinType.jtRound,ClipperLib.EndType.etClosedPolygon);
+  co.Execute(out,Math.abs(halfD)*scale);
+  return out.filter(function(poly){return poly&&poly.length>=3&&Math.abs(ClipperLib.Clipper.Area(poly))>=10;})
+    .map(function(poly){return poly.map(function(p){return{x:p.X/scale,y:p.Y/scale};});});
+}
+
+// Vá cục bộ micro-detour: offset contour đã làm sạch, sau đó hợp thêm vòng
+// an toàn D/2 quanh các đỉnh của riêng loop lỗi.
+// Nhờ vậy phần contour bình thường giữ nguyên offset danh nghĩa; chỉ vùng có
+// mấu nhỏ mới vòng ra ngoài như Aspire. Đây là đường bao tâm dao, không phải
+// nới kích thước offset cho toàn bộ chi tiết.
+function profileLocalMicroEnvelopeJS(loop,halfD){
+  if(typeof ClipperLib==='undefined'||!loop||loop.length<3||!(halfD>0)) return [];
+  var scale=1000,r=Math.abs(halfD),src=loop.map(function(e){
+    return {X:Math.round((+e.x1)*scale),Y:Math.round((+e.y1)*scale)};
+  });
+  var cleanTol=Math.min(0.5,Math.max(0.15,r*0.15));
+  var cleaned=ClipperLib.Clipper.CleanPolygon(src,cleanTol*scale);
+  if(!cleaned||cleaned.length<3) return [];
+
+  var base=[],co=new ClipperLib.ClipperOffset(2,0.001*scale);
+  co.AddPath(cleaned,ClipperLib.JoinType.jtRound,ClipperLib.EndType.etClosedPolygon);
+  co.Execute(base,r*scale);
+  if(!base.length) return [];
+
+  // Vòng bán kính đúng D/2 không làm nới kích thước danh nghĩa: nó chính là
+  // quỹ tích tâm dao tiếp xúc với từng đỉnh nguồn. Hợp tất cả vòng với offset
+  // cạnh clean tạo Minkowski envelope, nên mấu lồi còn tồn tại sau CleanPolygon
+  // cũng không thể bị dao đi xuyên qua. Nhánh này chỉ chạy cho micro-detour.
+  var patches=[],steps=96;
+  src.forEach(function(p){
+    var circle=[];
+    for(var k=0;k<steps;k++){
+      var a=2*Math.PI*k/steps;
+      circle.push({X:Math.round(p.X+Math.cos(a)*r*scale),Y:Math.round(p.Y+Math.sin(a)*r*scale)});
+    }
+    if(ClipperLib.Clipper.Orientation(circle)!==ClipperLib.Clipper.Orientation(base[0])) circle.reverse();
+    patches.push(circle);
+  });
+  if(!patches.length) return base.map(function(poly){
+    return poly.map(function(p){return{x:p.X/scale,y:p.Y/scale};});
+  });
+
+  var clip=new ClipperLib.Clipper(),solution=[];
+  clip.AddPaths(base,ClipperLib.PolyType.ptSubject,true);
+  clip.AddPaths(patches,ClipperLib.PolyType.ptSubject,true);
+  clip.Execute(ClipperLib.ClipType.ctUnion,solution,
+    ClipperLib.PolyFillType.pftNonZero,ClipperLib.PolyFillType.pftNonZero);
+  return solution.filter(function(poly){return poly&&poly.length>=3&&Math.abs(ClipperLib.Clipper.Area(poly))>=10;})
+    .map(function(poly){return poly.map(function(p){return{x:p.X/scale,y:p.Y/scale};});});
+}
+
+// Safety riêng cho outer Minkowski envelope. Không dùng khoảng cách tuyệt đối
+// tới MỌI cạnh nguồn: tại hốc lõm phía phế liệu, tâm dao được phép đi gần/cắt
+// ngang cạnh hốc mà không lẹm vào phần vật liệu. Điều kiện đúng là envelope
+// phải bao toàn bộ contour nguồn, không tự giao, và cạnh tâm dao không đi vào
+// polygon vật liệu.
+function profileLocalMicroEnvelopeSafeJS(loop,run){
+  if(!loop||loop.length<3||!run||run.length<3) return false;
+  var src=loop.map(function(e){return{x:+e.x1,y:+e.y1};});
+  function orient(a,b,c){return (b.x-a.x)*(c.y-a.y)-(b.y-a.y)*(c.x-a.x);}
+  function onSeg(a,b,p){return p.x>=Math.min(a.x,b.x)-1e-7&&p.x<=Math.max(a.x,b.x)+1e-7&&p.y>=Math.min(a.y,b.y)-1e-7&&p.y<=Math.max(a.y,b.y)+1e-7;}
+  function intersects(a,b,c,d){
+    var o1=orient(a,b,c),o2=orient(a,b,d),o3=orient(c,d,a),o4=orient(c,d,b);
+    if(((o1>1e-8&&o2< -1e-8)||(o1< -1e-8&&o2>1e-8))&&((o3>1e-8&&o4< -1e-8)||(o3< -1e-8&&o4>1e-8))) return true;
+    return (Math.abs(o1)<=1e-8&&onSeg(a,b,c))||(Math.abs(o2)<=1e-8&&onSeg(a,b,d))||
+           (Math.abs(o3)<=1e-8&&onSeg(c,d,a))||(Math.abs(o4)<=1e-8&&onSeg(c,d,b));
+  }
+  // Mọi đỉnh nguồn phải nằm trong (hoặc sát biên) envelope.
+  for(var s=0;s<src.length;s++){
+    if(_pointInPolyJS(src[s].x,src[s].y,run)) continue;
+    var onBoundary=false;
+    for(var rb=0;rb<run.length;rb++){
+      if(Math.abs(orient(run[rb],run[(rb+1)%run.length],src[s]))<=1e-6&&
+         onSeg(run[rb],run[(rb+1)%run.length],src[s])){onBoundary=true;break;}
+    }
+    if(!onBoundary) return false;
+  }
+  // Không cho đoạn envelope tự giao hoặc midpoint đi vào vật liệu.
+  for(var i=0;i<run.length;i++){
+    var a=run[i],b=run[(i+1)%run.length];
+    var mid={x:(a.x+b.x)/2,y:(a.y+b.y)/2};
+    if(_pointInPolyJS(mid.x,mid.y,src)) return false;
+    for(var k=i+1;k<run.length;k++){
+      if(k===i+1||(i===0&&k===run.length-1)) continue;
+      if(intersects(a,b,run[k],run[(k+1)%run.length])) return false;
+    }
+  }
+  return true;
+}
+
+function profileRepairCollapsedMicroJS(loop,run,halfD){
+  if(!run||run.length<4) return run;
+  var tol=Math.max(0.05,Math.abs(halfD)*0.02),minClear=Math.max(0,Math.abs(halfD)-tol);
+  function pointSeg(p,a,b){
+    var dx=b.x-a.x,dy=b.y-a.y,l2=dx*dx+dy*dy;
+    if(l2<1e-12)return Math.hypot(p.x-a.x,p.y-a.y);
+    var t=Math.max(0,Math.min(1,((p.x-a.x)*dx+(p.y-a.y)*dy)/l2));
+    return Math.hypot(p.x-a.x-t*dx,p.y-a.y-t*dy);
+  }
+  function clearance(p){
+    var d=Infinity;
+    loop.forEach(function(e){d=Math.min(d,pointSeg(p,{x:+e.x1,y:+e.y1},{x:+e.x2,y:+e.y2}));});
+    return d;
+  }
+  function lineHit(a,b,c,d){
+    var rx=b.x-a.x,ry=b.y-a.y,sx=d.x-c.x,sy=d.y-c.y,den=rx*sy-ry*sx;
+    if(Math.abs(den)<1e-9)return null;
+    var qx=c.x-a.x,qy=c.y-a.y,t=(qx*sy-qy*sx)/den;
+    return{x:a.x+t*rx,y:a.y+t*ry};
+  }
+  var bad=run.map(function(p){return clearance(p)<minClear;});
+  if(!bad.some(Boolean)||bad.every(Boolean))return run;
+  var n=run.length,start=-1;
+  for(var i=0;i<n;i++)if(!bad[i]&&bad[(i-1+n)%n]){start=i;break;}
+  if(start<0)return run;
+  var rot=[],flags=[];
+  for(var r=0;r<n;r++){var idx=(start+r)%n;rot.push(run[idx]);flags.push(bad[idx]);}
+  var out=[rot[0]],pos=1;
+  while(pos<n){
+    if(!flags[pos]){out.push(rot[pos]);pos++;continue;}
+    var firstBad=pos; while(pos<n&&flags[pos])pos++;
+    var prev=out[out.length-1],prevPrev=out.length>1?out[out.length-2]:rot[n-1];
+    var next=pos<n?rot[pos]:rot[0],lastBad=rot[pos-1];
+    var hit=lineHit(prevPrev,prev,lastBad,next);
+    if(!hit||Math.hypot(hit.x-prev.x,hit.y-prev.y)>Math.abs(halfD)*4+1||
+       Math.hypot(hit.x-next.x,hit.y-next.y)>Math.abs(halfD)*4+1)return run;
+    out.push(hit);
+    if(pos<n){out.push(next);pos++;}
+  }
+  return out;
+}
+
+function profileSafeCutOutClipperJS(loop,halfD){
+  var repaired=profileRawCutOutClipperJS(loop,halfD).map(function(run){
+    return profileRepairCollapsedMicroJS(loop,run,halfD);
+  }).filter(function(run){
+    return profileCutOutRunSafeJS(loop,run,halfD);
+  });
+  if(repaired.length)return repaired;
+  var cleaned=profileCleanedCutOutClipperJS(loop,halfD).filter(function(run){
+    return profileCutOutRunSafeJS(loop,run,halfD);
+  });
+  if(cleaned.length)return cleaned;
+  return profileLocalMicroEnvelopeJS(loop,halfD).filter(function(run){
+    return profileLocalMicroEnvelopeSafeJS(loop,run);
+  });
+}
+
+function profileLogRejectedMicroCutOutJS(loop,tool){
+  var halfD=(+tool.diameter||0)/2;
+  var raw=profileRawCutOutClipperJS(loop,halfD);
+  var repaired=raw.map(function(run){return profileRepairCollapsedMicroJS(loop,run,halfD);});
+  var cleaned=profileCleanedCutOutClipperJS(loop,halfD);
+  var localEnvelope=profileLocalMicroEnvelopeJS(loop,halfD);
+  console.log('[N2G PROFILE MICRO DEBUG] '+JSON.stringify({
+    layer:tool.layer,diameter:+tool.diameter||0,
+    source:loop.map(function(e){return{x1:e.x1,y1:e.y1,x2:e.x2,y2:e.y2};}),
+    raw_runs:raw,repaired_runs:repaired,cleaned_runs:cleaned,local_envelope_runs:localEnvelope,
+    repaired_safe_flags:repaired.map(function(run){return profileCutOutRunSafeJS(loop,run,halfD);}),
+    cleaned_safe_flags:cleaned.map(function(run){return profileCutOutRunSafeJS(loop,run,halfD);}),
+    local_envelope_safe_flags:localEnvelope.map(function(run){return profileLocalMicroEnvelopeSafeJS(loop,run);})
+  }));
+}
+
+
 // Aspire-style transition for a concave step whose two short edges are equal
 // to the tool radius. Clipper collapses that zero-clearance step to one miter
 // vertex. Replace only that vertex with the two offset tangent points, making
@@ -1490,9 +1735,39 @@ function buildLoopsJS(vecs){
       var first0 = loop[0];
       var last = loop[loop.length-1];
       var tailX = last.x2, tailY = last.y2;
-      // Loop ĐÃ KHÉP KÍN (đuôi về gần đầu, đủ cạnh) → DỪNG, không nối thêm. Tránh nối
-      // tiếp sang hình KHÁC ở sát cạnh (vd 2 dogbone tai tròn gần nhau bị gộp 1 loop).
-      if(loop.length >= 3 && Math.hypot(tailX-first0.x1, tailY-first0.y1) < 0.5) break;
+      // Khi đuôi đã gần đầu, vẫn có thể còn đúng cạnh khép hình rất ngắn trong
+      // `remaining`. Trước đây dừng ngay tại đây làm cạnh đó rơi thành một loop
+      // giả riêng (ví dụ cạnh 0.327 mm), rồi bị cắt thêm khi xuất G-code.
+      // Chỉ lấy cạnh nếu CẢ HAI đầu của nó lần lượt nối tail ↔ head; vì vậy không
+      // thể nhảy sang một hình khác chỉ tình cờ nằm gần một đầu.
+      if(loop.length >= 3 && Math.hypot(tailX-first0.x1, tailY-first0.y1) < 0.5){
+        var bridgeI=-1, bridgeFlip=false, bridgeScore=Infinity;
+        for(var bi=remaining.length-1; bi>=0; bi--){
+          var be=remaining[bi];
+          var directTail=Math.hypot(be.x1-tailX,be.y1-tailY);
+          var directHead=Math.hypot(be.x2-first0.x1,be.y2-first0.y1);
+          var flipTail=Math.hypot(be.x2-tailX,be.y2-tailY);
+          var flipHead=Math.hypot(be.x1-first0.x1,be.y1-first0.y1);
+          var directOK=directTail<0.5 && directHead<0.5;
+          var flipOK=flipTail<0.5 && flipHead<0.5;
+          if(!directOK && !flipOK) continue;
+          var directScore=directTail+directHead;
+          var flipScore=flipTail+flipHead;
+          var useFlip=flipOK && (!directOK || flipScore<directScore);
+          var score=useFlip?flipScore:directScore;
+          if(score<bridgeScore){ bridgeScore=score; bridgeI=bi; bridgeFlip=useFlip; }
+        }
+        if(bridgeI>=0){
+          var bridge=remaining.splice(bridgeI,1)[0];
+          if(bridgeFlip){
+            bridge = Object.assign({},bridge,{
+              x1:bridge.x2,y1:bridge.y2,x2:bridge.x1,y2:bridge.y1
+            });
+          }
+          loop.push(bridge);
+        }
+        break;
+      }
 
       // 1) Nối vào ĐUÔI: tìm edge gần tail NHẤT (tránh nhảy sang hình khác).
       var bestI = -1, bestFlip = false, bestD = Infinity;
@@ -1539,7 +1814,10 @@ function buildLoopsJS(vecs){
       }
     }
     var first = loop[0], last2 = loop[loop.length-1];
-    loop._closed = Math.hypot(last2.x2-first.x1, last2.y2-first.y1) < 1.0;
+    // Một cạnh thẳng ngắn không phải là một contour kín. Điều kiện cũ chỉ dựa
+    // vào khoảng cách < 1 mm nên cạnh rời 0.327 mm bị nhận nhầm là loop kín.
+    loop._closed = loop.length >= 2 &&
+      Math.hypot(last2.x2-first.x1, last2.y2-first.y1) < 1.0;
     loops.push(loop);
   }
   return loops;
