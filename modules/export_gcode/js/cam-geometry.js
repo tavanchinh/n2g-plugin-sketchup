@@ -375,12 +375,14 @@ function pocketContourRingsClipper(loop, halfD, stepover, maxRings){
             hi=mid;
           }
         }
-        // Last +1 is topology-sensitive: after a concave region splits, even
-        // a small offset delta can create the centre path that clears the
-        // remaining strip. Use only a geometric noise floor, not a fraction
-        // of stepover; a valid final delta can be well below one millimetre.
-        var minLastStep=0.25;
-        var inserted=!!(bestSolution && bestOff-lastGoodOff>=minLastStep);
+        // Chỉ cần Last +1 khi lõi còn xa vòng cuối hơn bán kính dao. Nếu khoảng
+        // còn lại <= halfD thì chính vòng cuối đã quét phủ tới đường co sâu nhất;
+        // thêm một contour nữa chỉ tạo đường chạy dư (vd pocket rộng 20 mm với
+        // dao D12.5: 10 - 6.25 = 3.75 mm < R6.25).
+        // Giữ một dung sai nhỏ để tránh chèn vòng do nhiễu làm tròn của Clipper.
+        var uncoveredDepth=bestOff===null ? 0 : bestOff-lastGoodOff;
+        var coverageTolerance=0.01;
+        var inserted=!!(bestSolution && uncoveredDepth>halfD+coverageTolerance);
         if(inserted) appendSolution(bestSolution);
       }
       break;

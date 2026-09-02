@@ -21,8 +21,6 @@ module N2G
       unless defined?(SRC_DIR)
         SRC_DIR     = File.dirname(__FILE__).freeze              # .../modules/export_gcode
         PLUGIN_ROOT = File.expand_path('../..', SRC_DIR).freeze  # .../n2g  (gốc plugin)
-        RELEASE_BASE = 'D:/09.Code/N2G_Release'.freeze           # thư mục gốc release
-
         # Không copy sang release (chỉ dùng khi phát triển)
         # Loại theo TÊN FILE — áp dụng ở mọi thư mục.
         EXCLUDE_NAMES = %w[
@@ -74,9 +72,17 @@ module N2G
         '0.0.0'
       end
 
-      # Thư mục release theo version: D:/09.Code/N2G_Release/<version>
-      def self.release_dir
-        File.join(RELEASE_BASE, plugin_version)
+      # Thư mục release theo version: <thư mục người dùng chọn>/<version>
+      def self.release_dir(base_dir)
+        File.join(base_dir, plugin_version)
+      end
+
+      # Hỏi thư mục gốc cho mỗi lần build để không phụ thuộc một ổ đĩa cố định.
+      def self.select_release_base
+        UI.select_directory(
+          title: 'Chọn thư mục lưu bản release N2G',
+          directory: PLUGIN_ROOT
+        )
       end
 
       # ── Điểm vào chính ──
@@ -85,13 +91,11 @@ module N2G
       #   false → GIỮ dialog_assets.rb sẵn có (vd bản obfuscate do Node tạo), chỉ copy
       def self.build!(regenerate_assets: true)
         t0 = Time.now
-        unless drive_exists?
-          UI.messagebox("Không thấy ổ D:/ cho #{RELEASE_BASE}.\nKiểm tra lại ổ đĩa rồi thử lại.")
-          return
-        end
+        release_base = select_release_base
+        return unless release_base && !release_base.to_s.empty?
 
         ver = plugin_version
-        dest = release_dir
+        dest = release_dir(release_base)
 
         if regenerate_assets
           html = bundle_html
@@ -259,11 +263,6 @@ module N2G
           end
         RUBY
         File.write(path, rb)
-      end
-
-      def self.drive_exists?
-        # D:/ có tồn tại không (Windows)
-        File.directory?('D:/') || File.directory?('D:\\')
       end
 
     end

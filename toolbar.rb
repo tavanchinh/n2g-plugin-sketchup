@@ -51,7 +51,7 @@ module N2G
     menu = UI.menu('Plugins').add_submenu('N2G (DEV)')
 
     # Build thường: gộp JS bằng Ruby (nén nhẹ, không obfuscate)
-    menu.add_item('Build release (Ruby) → D:/N2G_Release') do
+    menu.add_item('Build release (Ruby) → Chọn thư mục...') do
       if defined?(N2G::ExportGcode::ReleaseBuilder)
         N2G::ExportGcode::ReleaseBuilder.build!(regenerate_assets: true)
       else
@@ -60,7 +60,7 @@ module N2G
     end
 
     # Build giữ bản obfuscate của Node (chạy `node build_dialog.js` TRƯỚC)
-    menu.add_item('Build release (giữ bản obfuscate Node)') do
+    menu.add_item('Build release (giữ bản obfuscate Node) → Chọn thư mục...') do
       if defined?(N2G::ExportGcode::ReleaseBuilder)
         N2G::ExportGcode::ReleaseBuilder.build!(regenerate_assets: false)
       else
