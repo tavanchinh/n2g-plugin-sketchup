@@ -2557,8 +2557,42 @@ module N2G
 
       # Ghi pocket runs đã được JS clipping sinh trước, để G-code khớp preview.
       def self.write_pocket_runs(f, paths, cfg, clear_z)
-        groups = (paths || []).map { |p| p['runs'] || p[:runs] || [] }
-                             .reject(&:empty?)
+        # Simulator sắp các Pocket độc lập theo tâm bbox, nearest-neighbor từ
+        # gốc (0,0). Áp dụng đúng cùng thứ tự ở đây thay vì giữ thứ tự scanner.
+        pocket_records = (paths || []).map do |path|
+          runs = path['runs'] || path[:runs] || []
+          points = runs.flatten(1).select { |p| p.is_a?(Hash) }
+          next if points.empty?
+          xs = points.map { |p| (p['x'] || p[:x]).to_f }
+          ys = points.map { |p| (p['y'] || p[:y]).to_f }
+          bx_min = path['bxMin'] || path[:bxMin]
+          bx_max = path['bxMax'] || path[:bxMax]
+          by_min = path['byMin'] || path[:byMin]
+          by_max = path['byMax'] || path[:byMax]
+          center_x = bx_min && bx_max ? (bx_min.to_f + bx_max.to_f) / 2.0 : (xs.min + xs.max) / 2.0
+          center_y = by_min && by_max ? (by_min.to_f + by_max.to_f) / 2.0 : (ys.min + ys.max) / 2.0
+          { runs: runs, x: center_x, y: center_y }
+        end.compact
+
+        if pocket_records.size > 2
+          remaining = pocket_records.dup
+          current = remaining.min_by { |r| r[:x] * r[:x] + r[:y] * r[:y] }
+          remaining.delete_at(remaining.index(current))
+          ordered = [current]
+          until remaining.empty?
+            next_record = remaining.min_by do |r|
+              dx = r[:x] - current[:x]
+              dy = r[:y] - current[:y]
+              dx * dx + dy * dy
+            end
+            remaining.delete_at(remaining.index(next_record))
+            ordered << next_record
+            current = next_record
+          end
+          pocket_records = ordered
+        end
+
+        groups = pocket_records.map { |record| record[:runs] }.reject(&:empty?)
         return if groups.empty?
         state = {}
         feed = cfg[:feed] || 2500
@@ -2587,6 +2621,18 @@ module N2G
                 at_cut_z = false
               end
               next
+            end
+            # Với vòng kín kế tiếp, đổi điểm bắt đầu sang đỉnh gần vị trí hiện
+            # tại nhất. Đặc biệt khi in_out: chạy xong centerline có thể nối thẳng
+            # sang contour kế tiếp, không quay về điểm đầu tùy ý của Clipper.
+            if at_cut_z && pts.size >= 4 &&
+               Math.hypot(pts.first[:x] - pts.last[:x], pts.first[:y] - pts.last[:y]) <= 0.002
+              core = pts[0...-1]
+              nearest_i = (0...core.size).min_by do |i|
+                Math.hypot(core[i][:x] - state[:x].to_f, core[i][:y] - state[:y].to_f)
+              end
+              core = core[nearest_i..-1] + core[0...nearest_i]
+              pts = core + [{ x: core.first[:x], y: core.first[:y] }]
             end
             # Final safety gate after applying the real in_out/out_in order.
             # Never emit a long cross-region connector as G1, even if JS data

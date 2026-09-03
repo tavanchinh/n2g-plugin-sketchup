@@ -380,7 +380,10 @@ function drawToolpathPocket(ctx,vecs,tool,tx,ty,sc,dpr){
             Math.hypot(nextStart.x-prevEnd.x,nextStart.y-prevEnd.y) : Infinity;
           reverseJump=(nextEnd&&prevStart) ?
             Math.hypot(prevStart.x-nextEnd.x,prevStart.y-nextEnd.y) : Infinity;
-          if(forwardJump>maxSafeConnector || reverseJump>maxSafeConnector){
+          // Chỉ ngắt khi CẢ HAI cách ghép đều quá xa. Với centerline dài, một
+          // đầu nối với contour ngoài→trong và đầu đối diện nối khi đảo in_out;
+          // dùng OR ở đây làm chèn Safe-Z dù luôn có một đầu hợp lệ.
+          if(forwardJump>maxSafeConnector && reverseJump>maxSafeConnector){
             breakBefore=true;
           }
         }

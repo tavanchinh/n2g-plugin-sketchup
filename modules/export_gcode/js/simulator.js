@@ -132,7 +132,12 @@ function simPushDrillPaths(seq, paths, tool){
 // Sắp thứ tự GIỮA các pocket theo nearest-neighbor (gom pocket gần nhau).
 // Bên trong mỗi pocket, simPushPath tự emit các vòng theo thứ tự gốc (ngoài→trong).
 function simPushPocketPaths(seq, paths, tool){
-  var pts = paths.map(function(p){
+  // Pocket/island không có run thật không tham gia tuyến nearest-neighbor;
+  // Ruby cũng bỏ các nhóm này trước khi sắp thứ tự.
+  var executablePaths=paths.filter(function(p){
+    return p.runs && p.runs.some(function(run){return run && run.length>=2;});
+  });
+  var pts = executablePaths.map(function(p){
     var c = simPathCenter(p);
     return { path:p, x:(c?c.x:0), y:(c?c.y:0) };
   });
@@ -313,6 +318,18 @@ function simPushPath(seq, path, tool){
             if(joined.length>1) chunks.push(joined);
             joined=[];
             return;
+          }
+          // Khớp write_pocket_runs: vòng kín bắt đầu tại đỉnh gần điểm hiện tại
+          // nhất, giúp nối trực tiếp từ centerline sang contour kế tiếp.
+          if(joined.length && run.length>=4 &&
+             Math.hypot(run[0].x-run[run.length-1].x,run[0].y-run[run.length-1].y)<=0.002){
+            var core=run.slice(0,-1),prev=joined[joined.length-1],nearest=0,bestDist=Infinity;
+            core.forEach(function(p,i){
+              var d=Math.hypot(p.x-prev.x,p.y-prev.y);
+              if(d<bestDist){bestDist=d;nearest=i;}
+            });
+            core=core.slice(nearest).concat(core.slice(0,nearest));
+            run=core.concat([{x:core[0].x,y:core[0].y}]);
           }
           // Final-order safety check. This runs AFTER in_out reversal, so it
           // validates the exact connector that animation and Ruby will use.

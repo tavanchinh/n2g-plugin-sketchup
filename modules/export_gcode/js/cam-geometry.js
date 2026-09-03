@@ -323,7 +323,9 @@ function pocketContourRingsClipper(loop, halfD, stepover, maxRings){
             Math.round(Math.abs(ux)*100),Math.round(Math.abs(uy)*100)].join('|');
           if(cleanupRuns.some(function(r){return r._corridorKey===key;})) continue;
           var run=[p0,p1];
-          run._breakBefore=true;
+          // Centerline nằm hoàn toàn trong vùng contour trước đã quét. Cho phép
+          // nối ở Z cắt; writer/simulator sẽ xoay vòng kín kế tiếp tới điểm gần
+          // đầu cuối centerline nhất và vẫn áp dụng giới hạn connector an toàn.
           run._corridorKey=key;
           cleanupRuns.push(run);
         }
@@ -382,7 +384,12 @@ function pocketContourRingsClipper(loop, halfD, stepover, maxRings){
         // Giữ một dung sai nhỏ để tránh chèn vòng do nhiễu làm tròn của Clipper.
         var uncoveredDepth=bestOff===null ? 0 : bestOff-lastGoodOff;
         var coverageTolerance=0.01;
-        var inserted=!!(bestSolution && uncoveredDepth>halfD+coverageTolerance);
+        // collectNarrowCorridorCenters đã tạo đúng một centerline cho hành lang
+        // hẹp. Không chèn thêm contour gần suy biến cho cùng lõi, nếu không dao
+        // sẽ chạy 2-3 lần gần trùng nhau ở giữa pocket.
+        var hasCenterlineCleanup=cleanupRuns.length>0;
+        var inserted=!!(bestSolution && !hasCenterlineCleanup &&
+          uncoveredDepth>halfD+coverageTolerance);
         if(inserted) appendSolution(bestSolution);
       }
       break;

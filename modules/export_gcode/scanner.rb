@@ -504,12 +504,7 @@ module N2G
 
           map[pid] = {
             material: mat,
-            thickness: thick,
-            debug_source_name: nm,
-            debug_world_dims: world_dims.map { |v| v.round(3) },
-            debug_definition_dims: definition_dims.map { |v| v.round(3) },
-            debug_local_scaled_dims: local_scaled_dims.map { |v| v.round(3) },
-            debug_axis_scales: axis_scales.map { |v| v.round(6) }
+            thickness: thick
           }
         end
         map
@@ -552,18 +547,7 @@ module N2G
             break if pids.size >= 5
           end
           chosen = pids.map { |pid| [pid, map[pid]] }.find { |_pid, val| !val.nil? }
-          chosen_pid = chosen && chosen[0]
           info = chosen && chosen[1]
-          puts "[N2G THICKNESS DEBUG] sheet=#{old.inspect}"
-          puts "[N2G THICKNESS DEBUG] candidate_part_ids=#{pids.inspect}"
-          if info
-            puts "[N2G THICKNESS DEBUG] selected_part_id=#{chosen_pid.inspect} source_group=#{info[:debug_source_name].inspect}"
-            puts "[N2G THICKNESS DEBUG] world_bounds_mm=#{info[:debug_world_dims].inspect} definition_bounds_mm=#{info[:debug_definition_dims].inspect} axis_scales=#{info[:debug_axis_scales].inspect}"
-            puts "[N2G THICKNESS DEBUG] local_scaled_dims_mm=#{info[:debug_local_scaled_dims].inspect}"
-            puts "[N2G THICKNESS DEBUG] selected_thickness_mm=#{info[:thickness].inspect} material=#{info[:material].inspect}"
-          else
-            puts "[N2G THICKNESS DEBUG] no_matching_3d_part"
-          end
           next if info.nil?
 
           # Điền vào chỗ THIẾU, giữ nguyên chỗ đã có

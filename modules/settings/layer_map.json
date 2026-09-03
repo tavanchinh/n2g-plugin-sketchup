@@ -38,11 +38,11 @@
     "tool_notes": ""
   },
   {
-    "layer": "ABF_HN",
+    "layer": "ABF_RANH_LED",
     "name": "T1 D6",
     "diameter": 6,
     "type": "pocket",
-    "strategy": "pocket",
+    "strategy": "cut_out",
     "depth": 6,
     "stepover": 95,
     "rpm": 18000,

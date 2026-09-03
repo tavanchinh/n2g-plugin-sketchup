@@ -176,6 +176,67 @@ function closeThickWarn(proceed){
   if(_thickPendingResolve){ _thickPendingResolve(proceed); _thickPendingResolve = null; }
 }
 
+var _ecShowAllTools=false;
+
+function ecNestingLayerSet(){
+  var layers=new Set();
+  (typeof SHEETS!=='undefined' ? SHEETS : []).forEach(function(sheet){
+    (sheet.display||[]).forEach(function(v){
+      var layer=(typeof editEffectiveLayer==='function') ? editEffectiveLayer(v,sheet.name) : v.layer;
+      if(layer) layers.add(normalizeLayer(layer));
+    });
+  });
+  return layers;
+}
+
+function ecVisibleToolRecords(){
+  var nestingLayers=ecNestingLayerSet();
+  return (TOOLS||[]).map(function(tool,index){return {tool:tool,index:index};})
+    .filter(function(record){
+      return _ecShowAllTools || nestingLayers.has(normalizeLayer(record.tool.layer));
+    });
+}
+
+function ecToolRowsHtml(records){
+  if(!records.length){
+    return '<tr><td colspan="7" style="padding:14px 8px;text-align:center;color:var(--text3)">Không có layer của bộ dao trong nesting hiện tại</td></tr>';
+  }
+  return records.map(function(record){
+    var t=record.tool;
+    return '<tr style="border-bottom:1px solid var(--border)">' +
+      '<td style="padding:6px 8px;color:var(--text3);font-size:10px">' + (record.index+1) + '</td>' +
+      '<td style="padding:6px 8px"><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:' + (t.color||'#888') + ';margin-right:5px"></span>' + esc(t.layer||'—') + '</td>' +
+      '<td style="padding:6px 8px;color:var(--text2)">' + esc(t.name||'—') + '</td>' +
+      '<td style="padding:6px 8px;text-align:center">D' + esc(String(t.diameter)) + '</td>' +
+      '<td style="padding:6px 8px;text-align:center">' + esc(t.type||'—') + '</td>' +
+      '<td style="padding:6px 8px;text-align:center;color:#d94040">' + esc(String(t.depth)) + '</td>' +
+      '<td style="padding:6px 8px;text-align:center;color:var(--text3)">' + esc(String(t.feed)) + '</td>' +
+    '</tr>';
+  }).join('');
+}
+
+function ecRenderToolSummary(){
+  var records=ecVisibleToolRecords();
+  var tbody=document.getElementById('export-confirm-tool-body');
+  if(tbody) tbody.innerHTML=ecToolRowsHtml(records);
+  var countEl=document.querySelector('#export-confirm-modal [data-tool-count]');
+  if(countEl){
+    countEl.textContent=_ecShowAllTools ?
+      'Bộ dao — toàn bộ '+TOOLS.length+' layer' :
+      'Trong nesting — '+records.length+'/'+TOOLS.length+' layer';
+  }
+  var toggle=document.getElementById('ec-toggle-all-tools');
+  if(toggle){
+    toggle.style.display=records.length<TOOLS.length || _ecShowAllTools ? '' : 'none';
+    toggle.textContent=_ecShowAllTools ? 'Thu gọn' : 'Xem thêm ('+(TOOLS.length-records.length)+')';
+  }
+}
+
+function ecToggleAllTools(){
+  _ecShowAllTools=!_ecShowAllTools;
+  ecRenderToolSummary();
+}
+
 function showExportConfirm(){
   var postName = (document.getElementById('pp-save-name')||{value:''}).value.trim() || '(chưa đặt tên)';
   var header   = document.getElementById('pp-header').value.trim();
@@ -183,17 +244,9 @@ function showExportConfirm(){
   var ext      = document.getElementById('pp-ext').value || '.nc';
   var safez    = document.getElementById('pp-safez').value;
 
-  var toolRows = TOOLS.map(function(t, i){
-    return '<tr style="border-bottom:1px solid var(--border)">' +
-      '<td style="padding:6px 8px;color:var(--text3);font-size:10px">' + (i+1) + '</td>' +
-      '<td style="padding:6px 8px"><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:' + (t.color||'#888') + ';margin-right:5px"></span>' + t.layer + '</td>' +
-      '<td style="padding:6px 8px;color:var(--text2)">' + (t.name||'—') + '</td>' +
-      '<td style="padding:6px 8px;text-align:center">D' + t.diameter + '</td>' +
-      '<td style="padding:6px 8px;text-align:center">' + t.type + '</td>' +
-      '<td style="padding:6px 8px;text-align:center;color:#d94040">' + t.depth + '</td>' +
-      '<td style="padding:6px 8px;text-align:center;color:var(--text3)">' + t.feed + '</td>' +
-    '</tr>';
-  }).join('');
+  _ecShowAllTools=false;
+  var visibleToolRecords=ecVisibleToolRecords();
+  var toolRows=ecToolRowsHtml(visibleToolRecords);
 
   var activeItem = document.querySelector('.preset-item.active-preset');
   var activeId = activeItem ? activeItem.dataset.id : (TOOL_PRESETS[0] ? String(TOOL_PRESETS[0].id) : '');
@@ -221,7 +274,7 @@ function showExportConfirm(){
     '</div>' +
     '<div>' +
       '<div style="display:flex;align-items:center;gap:10px;margin-bottom:8px">' +
-        '<div style="font-size:9px;font-weight:700;color:var(--text3);text-transform:uppercase;letter-spacing:1px" data-tool-count>Bộ dao — ' + TOOLS.length + ' layer</div>' +
+        '<div style="font-size:9px;font-weight:700;color:var(--text3);text-transform:uppercase;letter-spacing:1px" data-tool-count>Trong nesting — ' + visibleToolRecords.length + '/' + TOOLS.length + ' layer</div>' +
         '<div style="flex:1"></div>' +
         '<select id="ec-tool-preset" style="font-size:10px;padding:3px 8px;border:1px solid var(--border2);border-radius:4px;background:var(--surface2);color:var(--text1)" onchange="ecLoadToolPreset(this.value)">' +
           '<option value="">— Chọn bộ dao —</option>' + presetOpts +
@@ -240,8 +293,11 @@ function showExportConfirm(){
           '<th style="padding:5px 8px;text-align:center;font-weight:600;color:var(--text3);font-size:9px">DEPTH</th>' +
           '<th style="padding:5px 8px;text-align:center;font-weight:600;color:var(--text3);font-size:9px">FEED</th>' +
         '</tr></thead>' +
-        '<tbody>' + toolRows + '</tbody>' +
+        '<tbody id="export-confirm-tool-body">' + toolRows + '</tbody>' +
       '</table>' +
+      '<div style="display:flex;justify-content:center;margin-top:8px">' +
+        '<button id="ec-toggle-all-tools" class="tbtn" onclick="ecToggleAllTools()" style="padding:5px 16px;font-size:10px;' + (visibleToolRecords.length<TOOLS.length?'':'display:none;') + '">Xem thêm (' + (TOOLS.length-visibleToolRecords.length) + ')</button>' +
+      '</div>' +
     '</div>';
 
   document.getElementById('export-confirm-modal').style.display = 'flex';
@@ -253,22 +309,8 @@ function ecLoadToolPreset(id){
   if(!p||!p.tools) return;
   TOOLS = JSON.parse(JSON.stringify(p.tools));
   renderToolTable();
-  var tbody = document.querySelector('#export-confirm-modal tbody');
-  if(tbody){
-    tbody.innerHTML = TOOLS.map(function(t, i){
-      return '<tr style="border-bottom:1px solid var(--border)">' +
-        '<td style="padding:6px 8px;color:var(--text3);font-size:10px">' + (i+1) + '</td>' +
-        '<td style="padding:6px 8px"><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:' + (t.color||'#888') + ';margin-right:5px"></span>' + t.layer + '</td>' +
-        '<td style="padding:6px 8px;color:var(--text2)">' + (t.name||'—') + '</td>' +
-        '<td style="padding:6px 8px;text-align:center">D' + t.diameter + '</td>' +
-        '<td style="padding:6px 8px;text-align:center">' + t.type + '</td>' +
-        '<td style="padding:6px 8px;text-align:center;color:#d94040">' + t.depth + '</td>' +
-        '<td style="padding:6px 8px;text-align:center;color:var(--text3)">' + t.feed + '</td>' +
-      '</tr>';
-    }).join('');
-    var countEl = document.querySelector('#export-confirm-modal [data-tool-count]');
-    if(countEl) countEl.textContent = 'Bộ dao — ' + TOOLS.length + ' layer';
-  }
+  _ecShowAllTools=false;
+  ecRenderToolSummary();
 }
 
 function ecLoadPost(id){
@@ -411,7 +453,10 @@ function n2gBuildPocketPathsForExport(){
         _n2gPocketExportWarnings.push({sheet:sheet.name,layer:tool.layer,diameter:+tool.diameter||0});
       }
       out[sheet.name+'::'+tool.layer]=rendered.map(function(p){
-        return { runs:(p.runs||[]).map(function(run){return run.map(function(q){return {x:q.x,y:q.y};});}) };
+        return {
+          bxMin:p.bxMin,bxMax:p.bxMax,byMin:p.byMin,byMax:p.byMax,
+          runs:(p.runs||[]).map(function(run){return run.map(function(q){return {x:q.x,y:q.y};});})
+        };
       });
     });
   });
