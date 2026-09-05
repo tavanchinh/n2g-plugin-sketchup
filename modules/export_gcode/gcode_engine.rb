@@ -2622,17 +2622,34 @@ module N2G
               end
               next
             end
-            # Với vòng kín kế tiếp, đổi điểm bắt đầu sang đỉnh gần vị trí hiện
-            # tại nhất. Đặc biệt khi in_out: chạy xong centerline có thể nối thẳng
-            # sang contour kế tiếp, không quay về điểm đầu tùy ý của Clipper.
+            # Với vòng kín kế tiếp, chiếu vị trí hiện tại lên CẠNH gần nhất rồi
+            # bắt đầu tại hình chiếu đó. Chọn đỉnh gần nhất vẫn có thể tạo đường
+            # chéo dài hơn stepover, nhất là ở dogbone.
             if at_cut_z && pts.size >= 4 &&
                Math.hypot(pts.first[:x] - pts.last[:x], pts.first[:y] - pts.last[:y]) <= 0.002
               core = pts[0...-1]
-              nearest_i = (0...core.size).min_by do |i|
-                Math.hypot(core[i][:x] - state[:x].to_f, core[i][:y] - state[:y].to_f)
+              best = nil
+              core.size.times do |i|
+                a = core[i]
+                b = core[(i + 1) % core.size]
+                dx = b[:x] - a[:x]
+                dy = b[:y] - a[:y]
+                len2 = dx * dx + dy * dy
+                t = if len2 <= 1.0e-12
+                      0.0
+                    else
+                      ((state[:x].to_f - a[:x]) * dx +
+                       (state[:y].to_f - a[:y]) * dy) / len2
+                    end
+                t = [[t, 0.0].max, 1.0].min
+                projected = { x: a[:x] + t * dx, y: a[:y] + t * dy }
+                dist = Math.hypot(projected[:x] - state[:x].to_f,
+                                  projected[:y] - state[:y].to_f)
+                best = { index: i, point: projected, distance: dist } if best.nil? || dist < best[:distance]
               end
-              core = core[nearest_i..-1] + core[0...nearest_i]
-              pts = core + [{ x: core.first[:x], y: core.first[:y] }]
+              next_i = (best[:index] + 1) % core.size
+              rotated = core[next_i..-1] + core[0...next_i]
+              pts = [best[:point]] + rotated + [{ x: best[:point][:x], y: best[:point][:y] }]
             end
             # Final safety gate after applying the real in_out/out_in order.
             # Never emit a long cross-region connector as G1, even if JS data
@@ -3043,6 +3060,20 @@ module N2G
           source_edges  = loop[:_n2g_source_edges] || edges
           feed          = effective_cfg[:feed]   || 2500
           z_feed        = effective_cfg[:z_feed] || 800
+
+          # CuttingLines must be closed part contours. A single open edge
+          # shorter than the cutter is a fragment stranded while assembling a
+          # nearby contour (often a tiny chord from a rounded corner). Never
+          # emit it through the legacy open-profile path.
+          _cutting_norm = cfg[:layer].to_s.upcase.gsub(/[^A-Z0-9]/, '')
+          if _cutting_norm.include?('CUTTINGLINES') && loop[:closed] != true && edges.size == 1
+            _fragment = edges.first
+            _fragment_len = Math.hypot(
+              _fragment[:x2] - _fragment[:x1], _fragment[:y2] - _fragment[:y1]
+            )
+            next if effective_cfg[:diameter].to_f > 0.0 &&
+                    _fragment_len < effective_cfg[:diameter].to_f
+          end
 
           all_x_lp = source_edges.flat_map { |e| [e[:x1], e[:x2]] }
           all_y_lp = source_edges.flat_map { |e| [e[:y1], e[:y2]] }

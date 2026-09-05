@@ -36,27 +36,41 @@ function buildPolygon(vecs, tx, ty) {
   if (!vecs.length) return null;
   const pts = [];
   const remaining = vecs.map(v => ({
-    x1:tx(v.x1),y1:ty(v.y1),x2:tx(v.x2),y2:ty(v.y2)
+    // Keep topology in model units. At fit-to-card scale, a fixed pixel
+    // tolerance can represent several mm and join a small tenon incorrectly.
+    x1:v.x1,y1:v.y1,x2:v.x2,y2:v.y2
   }));
   let cur = remaining.shift();
-  pts.push([cur.x1, cur.y1]);
-  pts.push([cur.x2, cur.y2]);
-  const THRESH = 2;
+  const firstModel = [cur.x1, cur.y1];
+  pts.push([tx(cur.x1), ty(cur.y1)]);
+  pts.push([tx(cur.x2), ty(cur.y2)]);
+  let lastModel = [cur.x2, cur.y2];
+  // Same model-space endpoint tolerance used by buildLoopsJS. This tolerates
+  // small SketchUp numeric gaps without growing when the canvas is zoomed out.
+  const THRESH = 0.5;
   let changed = true;
   while (remaining.length && changed) {
     changed = false;
-    const last = pts[pts.length - 1];
     for (let i = 0; i < remaining.length; i++) {
       const e = remaining[i];
-      if (Math.hypot(e.x1-last[0], e.y1-last[1]) < THRESH) {
-        pts.push([e.x2, e.y2]); remaining.splice(i,1); changed=true; break;
+      if (Math.hypot(e.x1-lastModel[0], e.y1-lastModel[1]) < THRESH) {
+        pts.push([tx(e.x2), ty(e.y2)]); lastModel=[e.x2,e.y2];
+        remaining.splice(i,1); changed=true; break;
       }
-      if (Math.hypot(e.x2-last[0], e.y2-last[1]) < THRESH) {
-        pts.push([e.x1, e.y1]); remaining.splice(i,1); changed=true; break;
+      if (Math.hypot(e.x2-lastModel[0], e.y2-lastModel[1]) < THRESH) {
+        pts.push([tx(e.x1), ty(e.y1)]); lastModel=[e.x1,e.y1];
+        remaining.splice(i,1); changed=true; break;
       }
     }
   }
-  return pts.length > 2 ? pts : null;
+  // Never hand an incomplete chain to ctx.closePath(): canvas would invent a
+  // long segment from the last resolved point back to the first one. This is
+  // the diagonal occasionally seen only in the small sheet-card preview.
+  const fullyConsumed = remaining.length === 0;
+  const genuinelyClosed = Math.hypot(
+    lastModel[0]-firstModel[0], lastModel[1]-firstModel[1]
+  ) < THRESH;
+  return pts.length > 2 && fullyConsumed && genuinelyClosed ? pts : null;
 }
 
 function drawLoopArrows(ctx,loop,tx,ty,color,dpr){
@@ -435,22 +449,71 @@ function profileLoopIdJS(loop){
 if(typeof window!=='undefined' && typeof window.N2G_PROFILE_CLIPPER_SCOPE==='undefined'){
   window.N2G_PROFILE_CLIPPER_SCOPE='islands_only';
 }
-function profileClipperAppliesJS(isIsland){
+function profileClipperAppliesJS(isIsland,strategy){
   var scope=(typeof window!=='undefined' && window.N2G_PROFILE_CLIPPER_SCOPE) || 'islands_only';
-  return scope==='all' || (scope==='islands_only' && isIsland===true);
+  // Closed cut_out must always use the exact edge-based offset. It must never be
+  // replaced by a repaired/bevelled approximation around positive tenons.
+  return strategy==='cut_out' || scope==='all' || (scope==='islands_only' && isIsland===true);
+}
+
+// Build a cut_out centreline from the ordered source edges themselves. Unlike
+// a polygon-union offset, this preserves every positive-tenon shoulder even
+// when neighbouring radius envelopes overlap. Every source edge stays parallel
+// at exactly halfD and consecutive offset lines meet at one miter point. This
+// deliberately keeps right-angle vectors square and avoids verbose arc points.
+function profileExactCutOutOffsetJS(loop,halfD){
+  if(!loop||loop.length<3||!(halfD>0)) return [];
+  var edges=loop.filter(function(e){return Math.hypot(e.x2-e.x1,e.y2-e.y1)>1e-7;});
+  if(edges.length<3) return [];
+  var verts=edges.map(function(e){return{x:+e.x1,y:+e.y1};});
+  var area=polySignedAreaJS(verts);
+  if(Math.abs(area)<1e-9) return [];
+  var side=area>0?1:-1, shifted=[];
+  edges.forEach(function(e){
+    var dx=e.x2-e.x1,dy=e.y2-e.y1,len=Math.hypot(dx,dy);
+    // right normal for CCW, left normal for CW
+    var nx=(dy/len)*side,ny=(-dx/len)*side;
+    shifted.push({dx:dx,dy:dy,nx:nx,ny:ny});
+  });
+  function lineIntersection(a,ad,b,bd){
+    var den=ad.x*bd.y-ad.y*bd.x;
+    if(Math.abs(den)<1e-10) return null;
+    var qx=b.x-a.x,qy=b.y-a.y;
+    var t=(qx*bd.y-qy*bd.x)/den;
+    return{x:a.x+t*ad.x,y:a.y+t*ad.y};
+  }
+  var out=[],n=edges.length;
+  for(var i=0;i<n;i++){
+    var prev=(i-1+n)%n,ep=edges[prev],ec=edges[i];
+    var np=shifted[prev],nc=shifted[i];
+    // Average the two nominally identical endpoints so sub-mm source gaps do
+    // not become artificial diagonal links in the generated centreline.
+    var v={x:(+ep.x2 + +ec.x1)/2,y:(+ep.y2 + +ec.y1)/2};
+    var p1={x:v.x+np.nx*halfD,y:v.y+np.ny*halfD};
+    var p2={x:v.x+nc.nx*halfD,y:v.y+nc.ny*halfD};
+    var hit=lineIntersection(p1,{x:np.dx,y:np.dy},p2,{x:nc.dx,y:nc.dy});
+    out.push(hit||{x:(p1.x+p2.x)/2,y:(p1.y+p2.y)/2});
+  }
+  return out;
 }
 
 function profileOffsetClipper(loop, halfD, strategy){
   if(typeof ClipperLib==='undefined' || !loop || loop.length<3 ||
      (strategy!=='cut_in' && strategy!=='cut_out')) return [];
+  if(strategy==='cut_out'){
+    var exact=profileExactCutOutOffsetJS(loop,Math.abs(halfD));
+    return exact.length>=3?[exact]:[];
+  }
   var scale=1000;
   var work=loop.filter(function(e){return Math.hypot(e.x2-e.x1,e.y2-e.y1)>1e-6;});
   var path=work.map(function(e){return {X:Math.round(e.x1*scale),Y:Math.round(e.y1*scale)};});
   if(path.length>3 && path[0].X===path[path.length-1].X && path[0].Y===path[path.length-1].Y) path.pop();
   if(path.length<3) return [];
+  // Normalise winding so a positive cut_out delta always expands the outer
+  // contour, independent of the direction in which SketchUp supplied edges.
+  if(!ClipperLib.Clipper.Orientation(path)) path.reverse();
   var co=new ClipperLib.ClipperOffset(2,0.25*scale), solution=[];
-  // Profile cut_out va cut_in deu giu goc vuong bang miter join.
-  // MiterLimit=2 o ClipperOffset van gioi han cac dinh qua nhon de tranh vot dai.
+  // cut_out returned above; the remaining cut_in branch keeps its miter rule.
   var joinType=ClipperLib.JoinType.jtMiter;
   co.AddPath(path,joinType,ClipperLib.EndType.etClosedPolygon);
   co.Execute(solution,(strategy==='cut_out'?halfD:-halfD)*scale);
@@ -459,8 +522,7 @@ function profileOffsetClipper(loop, halfD, strategy){
   }).map(function(poly){
     return poly.map(function(p){return {x:p.X/scale,y:p.Y/scale};});
   });
-  runs=profileCollapsedStepBevelJS(loop,runs,halfD,strategy);
-  return profileNarrowSlotReliefJS(loop,runs,halfD,strategy);
+  return runs;
 }
 
 function profileCutOutRunSafeJS(loop,run,halfD){
@@ -1136,7 +1198,7 @@ function islandClearingRuns(islandLoop, outerLoop, halfD, stepover, maxRings){
 // stepover, sau đó cắt trong vùng outer an toàn.
 // Mark transitions that cannot be traversed at cutting Z. This also covers
 // curved outer boundaries, where clipping creates disconnected open runs.
-function markUnsafePocketConnectorsJS(runs,outerLoop,islandLoops,halfD){
+function markUnsafePocketConnectorsJS(runs,outerLoop,islandLoops,halfD,direction){
   if(!runs || runs.length<2 || !outerLoop || outerLoop.length<3) return runs||[];
   var outerVerts=outerLoop.map(function(e){return {x:e.x1,y:e.y1};});
   var islandVerts=(islandLoops||[]).map(function(loop){
@@ -1166,16 +1228,15 @@ function markUnsafePocketConnectorsJS(runs,outerLoop,islandLoops,halfD){
   }
   for(var ri=1;ri<runs.length;ri++){
     var a=(runs[ri-1].pts||[]),b=(runs[ri].pts||[]);
-    // Check both execution orders. Ruby reverses the run list for in_out but
-    // intentionally preserves each contour's cutting direction.
     var safeForward=safeSegment(a[a.length-1],b[0]);
     var safeReverse=safeSegment(b[b.length-1],a[0]);
-    runs[ri].breakBefore=(runs[ri].breakBefore===true)||!safeForward||!safeReverse;
+    var selectedSafe=direction==='in_out' ? safeReverse : safeForward;
+    runs[ri].breakBefore=(runs[ri].breakBefore===true)||!selectedSafe;
   }
   return runs;
 }
 
-function islandClearingRunsClipper(islandLoops, outerLoop, halfD, stepover, maxRings){
+function islandClearingRunsClipper(islandLoops, outerLoop, halfD, stepover, maxRings, direction){
   var runs=[];
   if(typeof ClipperLib==='undefined' || !outerLoop || outerLoop.length<3 ||
      !islandLoops || !islandLoops.length) return runs;
@@ -1292,15 +1353,6 @@ function islandClearingRunsClipper(islandLoops, outerLoop, halfD, stepover, maxR
   // Xử lý hết mọi offset của một góc rồi mới chuyển sang góc kế tiếp.
   // Trong mỗi góc giữ thứ tự island → outer (pass tăng dần).
   cornerRuns.sort(function(a,b){return a.corner-b.corner || a.pass-b.pass || a.seq-b.seq;});
-  // Runs belonging to different corners are disconnected machining zones.
-  // Never traverse from one corner to another at cutting Z.
-  for(var ci=1;ci<cornerRuns.length;ci++){
-    if(cornerRuns[ci-1].corner!==cornerRuns[ci].corner){
-      cornerRuns[ci].run.breakBefore=true;
-    }
-  }
-  runs=closedRuns.concat(cornerRuns.map(function(item){return item.run;}),finishRuns);
-
   // Validate every at-depth connector against the tool-centre safe region.
   // Unsafe transitions are marked; tp-pocket keeps the existing JSON shape by
   // serializing the mark as an empty run (a Safe-Z separator for Ruby).
@@ -1328,11 +1380,87 @@ function islandClearingRunsClipper(islandLoops, outerLoop, halfD, stepover, maxR
     }
     return true;
   }
+  function orientedPts(run,reversed){
+    var pts=run.pts||[];
+    return reversed ? pts.slice().reverse() : pts;
+  }
+  function cornerTransition(aPts,bPts){
+    if(!aPts.length || !bPts.length) return {safe:false,cost:Infinity};
+    // Ruby reverses the run LIST for in_out, but preserves each open run's
+    // direction. Validate the connector that the selected direction will use.
+    var forwardLen=Math.hypot(
+      bPts[0].x-aPts[aPts.length-1].x,
+      bPts[0].y-aPts[aPts.length-1].y
+    );
+    var reverseLen=Math.hypot(
+      aPts[0].x-bPts[bPts.length-1].x,
+      aPts[0].y-bPts[bPts.length-1].y
+    );
+    var maxJoin=stepover+0.01;
+    var forwardSafe=forwardLen<=maxJoin &&
+      connectorIsSafe(aPts[aPts.length-1],bPts[0]);
+    var reverseSafe=reverseLen<=maxJoin &&
+      connectorIsSafe(bPts[bPts.length-1],aPts[0]);
+    var useReverse=direction==='in_out';
+    return {
+      safe:useReverse ? reverseSafe : forwardSafe,
+      cost:useReverse ? reverseLen : forwardLen
+    };
+  }
+
+  // Open contours in one corner normally arrive with the same direction. That
+  // makes the end of one pass connect diagonally to the opposite end of the
+  // next pass. Choose the directions as a zig-zag. A two-state dynamic program
+  // keeps this local to each corner and minimises unsafe transitions; unsafe
+  // pairs still retain a Safe-Z separator.
+  for(var groupStart=0;groupStart<cornerRuns.length;){
+    var groupEnd=groupStart+1;
+    while(groupEnd<cornerRuns.length &&
+          cornerRuns[groupEnd].corner===cornerRuns[groupStart].corner) groupEnd++;
+    var count=groupEnd-groupStart;
+    var dp=[], parent=[];
+    dp[0]=[0,0]; parent[0]=[-1,-1];
+    for(var gi=1;gi<count;gi++){
+      dp[gi]=[Infinity,Infinity]; parent[gi]=[-1,-1];
+      for(var curRev=0;curRev<2;curRev++){
+        var curPts=orientedPts(cornerRuns[groupStart+gi].run,curRev===1);
+        for(var prevRev=0;prevRev<2;prevRev++){
+          var prevPts=orientedPts(cornerRuns[groupStart+gi-1].run,prevRev===1);
+          var transition=cornerTransition(prevPts,curPts);
+          var candidate=dp[gi-1][prevRev]+transition.cost+(transition.safe?0:1000000);
+          if(candidate<dp[gi][curRev]){
+            dp[gi][curRev]=candidate;
+            parent[gi][curRev]=prevRev;
+          }
+        }
+      }
+    }
+    var chosen=new Array(count), state=dp[count-1][1]<dp[count-1][0]?1:0;
+    for(var back=count-1;back>=0;back--){
+      chosen[back]=state;
+      state=parent[back][state];
+    }
+    for(var apply=0;apply<count;apply++){
+      var item=cornerRuns[groupStart+apply];
+      if(chosen[apply]===1) item.run.pts.reverse();
+      if(apply>0){
+        var before=cornerRuns[groupStart+apply-1].run.pts;
+        var after=item.run.pts;
+        item.run.breakBefore=!cornerTransition(before,after).safe;
+      }
+    }
+    // Different corners are disconnected machining zones.
+    if(groupStart>0) cornerRuns[groupStart].run.breakBefore=true;
+    groupStart=groupEnd;
+  }
+
+  runs=closedRuns.concat(cornerRuns.map(function(item){return item.run;}),finishRuns);
   for(var ri=1;ri<runs.length;ri++){
     var prevPts=runs[ri-1].pts||[], nextPts=runs[ri].pts||[];
     var safeForward=connectorIsSafe(prevPts[prevPts.length-1],nextPts[0]);
     var safeReverse=connectorIsSafe(nextPts[nextPts.length-1],prevPts[0]);
-    runs[ri].breakBefore=(runs[ri].breakBefore===true)||!safeForward||!safeReverse;
+    var selectedSafe=direction==='in_out' ? safeReverse : safeForward;
+    runs[ri].breakBefore=(runs[ri].breakBefore===true)||!selectedSafe;
   }
   // maxRings chỉ là chốt an toàn. Không tự thêm outer khi dừng bởi giới hạn vì
   // như vậy có thể tạo một bước nhảy lớn qua vùng chưa vét.

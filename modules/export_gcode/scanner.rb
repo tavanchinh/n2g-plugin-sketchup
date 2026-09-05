@@ -128,6 +128,31 @@ module N2G
         clusters.values
       end
 
+      # Preserve source geometry for UI rendering. CAM may replace a drill
+      # contour with a centre point in `vectors`, but `display` must remain an
+      # exact view of the nested SketchUp edges.
+      def self.extract_raw_display(parent, trans, sheet_inv, tools, disp_arr, group_id=nil, part_id=nil)
+        entities = parent.is_a?(Sketchup::Model) ? parent.entities : parent.definition.entities
+        entities.each do |ent|
+          if ent.is_a?(Sketchup::Group) || ent.is_a?(Sketchup::ComponentInstance)
+            extract_raw_display(ent, trans * ent.transformation, sheet_inv,
+                                tools, disp_arr, group_id, part_id)
+          elsif ent.is_a?(Sketchup::Edge)
+            l_name = GcodeEngine.normalize_layer(ent.layer.name)
+            cfg = tools[l_name]
+            lp1 = ent.start.position.transform(trans).transform(sheet_inv)
+            lp2 = ent.end.position.transform(trans).transform(sheet_inv)
+            disp_arr << {
+              x1: lp1.x.to_mm, y1: lp1.y.to_mm,
+              x2: lp2.x.to_mm, y2: lp2.y.to_mm,
+              color: (l_name == 'ABF_LABEL' ? '#aaaaaa' : (cfg ? cfg[:color] : '#444444')),
+              layer: l_name, is_drill_center: false,
+              group_id: group_id, part_id: part_id
+            }
+          end
+        end
+      end
+
       def self.extract_data(parent, trans, sheet_inv, tools, clean_arr, disp_arr, group_id=nil, depth=0, stray_drills=nil, part_id=nil)
         entities = parent.is_a?(Sketchup::Model) ? parent.entities : parent.definition.entities
 
@@ -138,6 +163,14 @@ module N2G
             is_lab = name.include?("_abf_label") ||
                      GcodeEngine.normalize_layer(ent.layer.name) == "ABF_LABEL"
             inner  = ent.definition.entities
+
+            child_gid = depth == 0 ? ent.entityID : group_id
+            child_pid = if depth == 0
+              m = (ent.name || "").to_s.match(/^_*(\d+)/)
+              m ? m[1] : nil
+            else
+              part_id
+            end
 
             # Detect drill: config trước, fallback heuristic
             inner_edges      = inner.select { |x| x.is_a?(Sketchup::Edge) }
@@ -228,26 +261,22 @@ module N2G
                     layer: l_name, is_drill_center: true, diameter: diam
                   }
                   clean_arr << vec
-                  disp_arr  << vec
                 end
               end
               # Pure Drill giu hanh vi cu: thay contour bang center. Mixed
               # Profile+Drill tiep tuc recurse de giu edge cho Profile.
-              next unless has_non_drill_cfg
+              unless has_non_drill_cfg
+                extract_raw_display(ent, trans * ent.transformation, sheet_inv,
+                                    tools, disp_arr, child_gid, child_pid)
+                next
+              end
             end
 
             # Gán group_id tại group chi tiết (cấp ngay dưới sheet = depth 0).
             # Mọi edge bên trong chi tiết này (kể cả island) sẽ chung group_id.
             # Đây là ranh giới phân biệt island: chỉ xét island trong cùng group_id.
-            child_gid = depth == 0 ? ent.entityID : group_id
             # Tách ID chi tiết từ tên group (dạng "__324. Hồi-" → "324").
             # Chỉ lấy tại depth 0 (group chi tiết); cấp con giữ ID của cha.
-            child_pid = if depth == 0
-              m = (ent.name || "").to_s.match(/^_*(\d+)/)
-              m ? m[1] : nil
-            else
-              part_id
-            end
             sub = []
             extract_data(ent, trans * ent.transformation, sheet_inv,
                          tools, is_lab ? [] : clean_arr, sub, child_gid, depth + 1, stray_drills, child_pid)
@@ -282,7 +311,18 @@ module N2G
                   diameter: (drill_cfg ? drill_cfg[:diameter] : 5.0)
                 }
               end
-              next unless has_non_drill_cfg
+              unless has_non_drill_cfg
+                lp1 = ent.start.position.transform(trans).transform(sheet_inv)
+                lp2 = ent.end.position.transform(trans).transform(sheet_inv)
+                disp_arr << {
+                  x1: lp1.x.to_mm, y1: lp1.y.to_mm,
+                  x2: lp2.x.to_mm, y2: lp2.y.to_mm,
+                  color: (drill_cfg ? drill_cfg[:color] : '#444444'),
+                  layer: l_name, is_drill_center: false,
+                  group_id: group_id, part_id: part_id
+                }
+                next
+              end
             end
 
             lp1   = ent.start.position.transform(trans).transform(sheet_inv)
@@ -355,7 +395,6 @@ module N2G
               layer: l_name, is_drill_center: true, diameter: diam
             }
             clean_arr << vec
-            disp_arr  << vec
           end
         end
       end

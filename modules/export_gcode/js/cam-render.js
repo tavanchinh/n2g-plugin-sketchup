@@ -180,7 +180,10 @@ function renderSheets(){
       <span class="sheet-dim">${Math.round(s.width)} × ${Math.round(s.height)} mm</span>
     </div>`;
     const CW=560,CH=Math.round(CW*(s.height>0?s.height/s.width:0.6));
-    const cv=document.createElement('canvas');cv.width=CW;cv.height=CH;
+    const dpr=Math.max(1,window.devicePixelRatio||1);
+    const cv=document.createElement('canvas');
+    cv.width=Math.round(CW*dpr);cv.height=Math.round(CH*dpr);
+    cv.dataset.logicalWidth=CW;cv.dataset.logicalHeight=CH;cv.dataset.dpr=dpr;
     cv.dataset.sheetIdx=si;      // để vẽ on-demand theo index
     cv.dataset.drawn='0';        // chưa vẽ
     card.appendChild(cv);
@@ -248,8 +251,18 @@ function _setupLazyRender(){
 
 function drawSheet(cv,s,CW,CH){
   const ctx=cv.getContext('2d');
-  ctx.clearRect(0,0,cv.width,cv.height);
-  CW=CW||cv.width; CH=CH||cv.height;
+  const dpr=Math.max(1,+(cv.dataset.dpr||window.devicePixelRatio||1));
+  CW=+(cv.dataset.logicalWidth||CW||cv.clientWidth||cv.width/dpr);
+  CH=+(cv.dataset.logicalHeight||CH||cv.clientHeight||cv.height/dpr);
+  const backingW=Math.round(CW*dpr),backingH=Math.round(CH*dpr);
+  if(cv.width!==backingW) cv.width=backingW;
+  if(cv.height!==backingH) cv.height=backingH;
+  ctx.setTransform(dpr,0,0,dpr,0,0);
+  ctx.clearRect(0,0,CW,CH);
+  // Keep tiny square tenons visually square at fit-to-card zoom. The backing
+  // canvas is HiDPI; miter/butt avoids rounded joins adding another artefact.
+  ctx.lineJoin='miter';
+  ctx.lineCap='butt';
   const PAD=14;
   const sc=Math.min((CW-PAD*2)/s.width,(CH-PAD*2)/s.height);
   const tx=x=>x*sc+PAD, ty=y=>CH-(y*sc+PAD);
@@ -319,6 +332,14 @@ function drawSheet(cv,s,CW,CH){
       ctx.closePath();
       ctx.fillStyle='#e4e4e0';ctx.fill();
       ctx.strokeStyle='#a8a8a0';ctx.lineWidth=0.8;ctx.stroke();
+    } else {
+      // An incomplete border must not be force-closed with an invented
+      // diagonal. Preserve the source geometry by drawing its edges directly.
+      ctx.strokeStyle='#a8a8a0';ctx.lineWidth=0.8;
+      vecs.forEach(v=>{
+        ctx.beginPath();ctx.moveTo(tx(v.x1),ty(v.y1));
+        ctx.lineTo(tx(v.x2),ty(v.y2));ctx.stroke();
+      });
     }
   });
 
@@ -328,25 +349,9 @@ function drawSheet(cv,s,CW,CH){
     const vecs=getVecs(l);
     const color=getLayerColor(l);
     // Thử fill polygon — nếu thành công tấm con sẽ nổi lên nền trắng
-    const used=new Set(); let remaining=[...vecs];
-    while(remaining.length>0){
+    const groups=buildLoopsJS(vecs);
+    groups.forEach(group=>{
       // Lấy 1 nhóm edges liên kết
-      const group=[remaining.shift()];
-      let changed=true;
-      while(changed){
-        changed=false;
-        for(let i=remaining.length-1;i>=0;i--){
-          const last=group[group.length-1];
-          const e=remaining[i];
-          const T=1;
-          if(Math.hypot(e.x1-last.x2,e.y1-last.y2)<T||
-             Math.hypot(e.x2-last.x2,e.y2-last.y2)<T||
-             Math.hypot(e.x1-last.x1,e.y1-last.y1)<T||
-             Math.hypot(e.x2-last.x1,e.y2-last.y1)<T){
-            group.push(remaining.splice(i,1)[0]);changed=true;
-          }
-        }
-      }
       if(group.length>=3){
         const poly=buildPolygon(group,tx,ty);
         if(poly&&poly.length>=3){
@@ -361,7 +366,7 @@ function drawSheet(cv,s,CW,CH){
           group.forEach(v=>{ctx.beginPath();ctx.moveTo(tx(v.x1),ty(v.y1));ctx.lineTo(tx(v.x2),ty(v.y2));ctx.stroke()});
         }
       }
-    }
+    });
   });
 
   // 3. Other layers (edgeBanding, ranhHau, MONG...) — mỗi layer 1 màu
@@ -461,7 +466,9 @@ function drawFocusBox(card, s, vecs, layerName){
   var yMin=Math.min.apply(null,ys), yMax=Math.max.apply(null,ys);
 
   // transform giống drawSheet
-  var CW=cv.width, CH=cv.height, PAD=14;
+  var dpr=Math.max(1,+(cv.dataset.dpr||window.devicePixelRatio||1));
+  var CW=+(cv.dataset.logicalWidth||cv.width/dpr);
+  var CH=+(cv.dataset.logicalHeight||cv.height/dpr), PAD=14;
   var sc=Math.min((CW-PAD*2)/s.width,(CH-PAD*2)/s.height);
   var tx=function(x){return x*sc+PAD;};
   var ty=function(y){return CH-(y*sc+PAD);};

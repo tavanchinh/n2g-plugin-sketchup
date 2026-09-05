@@ -27,15 +27,49 @@ module N2G
       APP_SETTINGS_JSON  = File.join(SETTINGS_DIR, 'app_settings.json').freeze
     end
 
+    # 17000 là dấu hiệu phục hồi dữ liệu RPM lỗi/thiếu, để phân biệt với mặc
+    # định 18000 thường được người dùng sử dụng.
+    def self.safe_rpm(value)
+      rpm = Float(value)
+      rpm.finite? && rpm.positive? ? rpm.to_i : 17_000
+    rescue ArgumentError, TypeError
+      17_000
+    end
+
+    def self.normalize_tool_rpms!(tools)
+      Array(tools).each do |tool|
+        next unless tool.is_a?(Hash)
+        key = tool.key?("rpm") ? "rpm" : :rpm
+        tool[key] = safe_rpm(tool[key])
+      end
+      tools
+    end
+
+    def self.normalize_group_rpms!(groups)
+      Array(groups).each do |group|
+        next unless group.is_a?(Hash)
+        normalize_tool_rpms!(group["tools"] || group[:tools])
+      end
+      groups
+    end
+
+    def self.normalize_preset_rpms!(presets)
+      Array(presets).each do |preset|
+        next unless preset.is_a?(Hash)
+        normalize_tool_rpms!(preset["tools"] || preset[:tools])
+      end
+      presets
+    end
+
     # --------------------------------------------------------------------------
     # Tools — load/save tools.json (flat list, có thể từ group hoặc custom)
     # --------------------------------------------------------------------------
 
     def self.load_tools
       if File.exist?(TOOLS_JSON)
-        JSON.parse(File.read(TOOLS_JSON))
+        normalize_tool_rpms!(JSON.parse(File.read(TOOLS_JSON)))
       else
-        N2G_DEFAULT_TOOLS.map(&:dup)
+        normalize_tool_rpms!(N2G_DEFAULT_TOOLS.map(&:dup))
       end
     rescue => e
       puts "N2G::Settings.load_tools error: #{e.message}"
@@ -43,6 +77,7 @@ module N2G
     end
 
     def self.save_tools(tools_array)
+      normalize_tool_rpms!(tools_array)
       File.write(TOOLS_JSON, JSON.pretty_generate(tools_array))
       true
     rescue => e
@@ -57,6 +92,7 @@ module N2G
     def self.load_tool_groups
       if File.exist?(TOOL_GROUPS_JSON)
         groups = JSON.parse(File.read(TOOL_GROUPS_JSON), symbolize_names: false)
+        normalize_group_rpms!(groups)
         # Dọn id trùng (do nhập nhiều lần): nhóm nào trùng id thì cấp id mới.
         seen = {}
         changed = false
@@ -100,6 +136,7 @@ module N2G
     end
 
     def self.save_tool_groups(groups_array)
+      normalize_group_rpms!(groups_array)
       File.write(TOOL_GROUPS_JSON, JSON.pretty_generate(groups_array))
       true
     rescue => e
@@ -168,7 +205,7 @@ module N2G
     # --------------------------------------------------------------------------
 
     def self.load_layer_map
-      return JSON.parse(File.read(LAYER_MAP_JSON)) if File.exist?(LAYER_MAP_JSON)
+      return normalize_tool_rpms!(JSON.parse(File.read(LAYER_MAP_JSON))) if File.exist?(LAYER_MAP_JSON)
       []
     rescue => e
       puts "N2G::Settings.load_layer_map error: #{e.message}"
@@ -176,6 +213,7 @@ module N2G
     end
 
     def self.save_layer_map(map_array)
+      normalize_tool_rpms!(map_array)
       File.write(LAYER_MAP_JSON, JSON.pretty_generate(map_array))
       true
     rescue => e
@@ -203,7 +241,7 @@ module N2G
           spindle_off: (entry["spindle_off"] || "").to_s.strip,
           tool_notes:  (entry["tool_notes"]  || "").to_s.strip,
           stepover: entry["stepover"].to_f,
-          rpm:      entry["rpm"].to_i,
+          rpm:      safe_rpm(entry["rpm"]).to_i,
           feed:     entry["feed"].to_i,
           z_feed:    entry["z_feed"].to_i,
           direction: entry["direction"] || 'cw'
@@ -272,7 +310,7 @@ module N2G
     # --------------------------------------------------------------------------
 
     def self.load_tool_presets
-      return JSON.parse(File.read(TOOL_PRESETS_JSON)) if File.exist?(TOOL_PRESETS_JSON)
+      return normalize_preset_rpms!(JSON.parse(File.read(TOOL_PRESETS_JSON))) if File.exist?(TOOL_PRESETS_JSON)
       []
     rescue => e
       puts "N2G::Settings.load_tool_presets error: #{e.message}"
@@ -280,6 +318,7 @@ module N2G
     end
 
     def self.save_tool_presets(presets_array)
+      normalize_preset_rpms!(presets_array)
       File.write(TOOL_PRESETS_JSON, JSON.pretty_generate(presets_array))
       true
     rescue => e

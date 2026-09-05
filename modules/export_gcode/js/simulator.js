@@ -12,6 +12,7 @@
 var simState = (typeof simState!=='undefined') ? simState : {
   sequence: [],      // danh sách bước [{layer, tool, type, pts:[{x,y}], feed}]
   enabledLayers: null, // Set tên layer được tích; null = tất cả
+  availableLayers: null, // Các layer thực sự có trong danh sách mô phỏng
   speed: 1.0,        // hệ số tốc độ (0.1×..10×), slider giữa = 1×
 };
 
@@ -132,10 +133,11 @@ function simPushDrillPaths(seq, paths, tool){
 // Sắp thứ tự GIỮA các pocket theo nearest-neighbor (gom pocket gần nhau).
 // Bên trong mỗi pocket, simPushPath tự emit các vòng theo thứ tự gốc (ngoài→trong).
 function simPushPocketPaths(seq, paths, tool){
-  // Pocket/island không có run thật không tham gia tuyến nearest-neighbor;
-  // Ruby cũng bỏ các nhóm này trước khi sắp thứ tự.
+  // Chỉ Pocket rỗng mới bị loại. Hàm này còn dùng cho Profile cut_in/cut_on;
+  // các path đó dùng pts/circle, không có runs nhưng vẫn phải vào animation.
   var executablePaths=paths.filter(function(p){
-    return p.runs && p.runs.some(function(run){return run && run.length>=2;});
+    return p.type!=='pocket' ||
+      (p.runs && p.runs.some(function(run){return run && run.length>=2;}));
   });
   var pts = executablePaths.map(function(p){
     var c = simPathCenter(p);
@@ -319,17 +321,22 @@ function simPushPath(seq, path, tool){
             joined=[];
             return;
           }
-          // Khớp write_pocket_runs: vòng kín bắt đầu tại đỉnh gần điểm hiện tại
-          // nhất, giúp nối trực tiếp từ centerline sang contour kế tiếp.
+          // Khớp write_pocket_runs: bắt đầu vòng kín tại hình chiếu gần nhất
+          // trên một cạnh, không chỉ tại đỉnh (đặc biệt quan trọng với dogbone).
           if(joined.length && run.length>=4 &&
              Math.hypot(run[0].x-run[run.length-1].x,run[0].y-run[run.length-1].y)<=0.002){
-            var core=run.slice(0,-1),prev=joined[joined.length-1],nearest=0,bestDist=Infinity;
-            core.forEach(function(p,i){
-              var d=Math.hypot(p.x-prev.x,p.y-prev.y);
-              if(d<bestDist){bestDist=d;nearest=i;}
+            var core=run.slice(0,-1),prev=joined[joined.length-1],best=null;
+            core.forEach(function(a,i){
+              var b=core[(i+1)%core.length],dx=b.x-a.x,dy=b.y-a.y,l2=dx*dx+dy*dy;
+              var t=l2<=1e-12?0:((prev.x-a.x)*dx+(prev.y-a.y)*dy)/l2;
+              t=Math.max(0,Math.min(1,t));
+              var projected={x:a.x+t*dx,y:a.y+t*dy};
+              var d=Math.hypot(projected.x-prev.x,projected.y-prev.y);
+              if(!best||d<best.dist) best={index:i,point:projected,dist:d};
             });
-            core=core.slice(nearest).concat(core.slice(0,nearest));
-            run=core.concat([{x:core[0].x,y:core[0].y}]);
+            var nextI=(best.index+1)%core.length;
+            core=core.slice(nextI).concat(core.slice(0,nextI));
+            run=[best.point].concat(core,[{x:best.point.x,y:best.point.y}]);
           }
           // Final-order safety check. This runs AFTER in_out reversal, so it
           // validates the exact connector that animation and Ruby will use.
@@ -484,6 +491,7 @@ function simBuildLayerList(){
   if(!simState.enabledLayers){
     simState.enabledLayers=new Set(Object.keys(seen));
   }
+  simState.availableLayers=new Set(Object.keys(seen));
   simUpdateAllCheckbox();
 }
 
@@ -668,7 +676,13 @@ function simRenderFrame(){
   ctx.clearRect(0,0,cv.width,cv.height);
   ctx.fillStyle='#fafafa'; ctx.fillRect(0,0,cv.width,cv.height);
   const layerGroups={};
-  s.display.forEach(v=>{ if(v.is_drill_center)return; (layerGroups[v.layer]=layerGroups[v.layer]||[]).push(v); });
+  s.display.forEach(v=>{
+    if(v.is_drill_center)return;
+    var layer=(typeof editEffectiveLayer==='function') ? editEffectiveLayer(v,s.name) : v.layer;
+    if(simState.availableLayers && simState.availableLayers.has(layer) &&
+       simState.enabledLayers && !simState.enabledLayers.has(layer)) return;
+    (layerGroups[layer]=layerGroups[layer]||[]).push(v);
+  });
   Object.entries(layerGroups).forEach(([layer,vecs])=>{
     const col=(typeof getLayerColor==='function')?getLayerColor(layer):'#888';
     ctx.strokeStyle=col+'55'; ctx.lineWidth=dpr*1.1; ctx.setLineDash([]);

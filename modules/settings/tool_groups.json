@@ -67,5 +67,74 @@
         "tool_notes": ""
       }
     ]
+  },
+  {
+    "id": "group_1788511696490",
+    "name": "CNN TRUNG TÂM",
+    "machine": "",
+    "description": "",
+    "spindles": 1,
+    "tools": [
+      {
+        "tool_number": 1,
+        "name": "T1D6",
+        "diameter": 6,
+        "bit_type": "flat",
+        "vbit_angle": 120,
+        "stepover": 90,
+        "max_depth": 20,
+        "rpm": 18000,
+        "feed": 12000,
+        "z_feed": 3000,
+        "spindle_on": "M3",
+        "spindle_off": "M05",
+        "tool_notes": "T1,M3 S18000,G43 H1"
+      },
+      {
+        "tool_number": 2,
+        "name": "T22 D3",
+        "diameter": 3,
+        "bit_type": "flat",
+        "vbit_angle": 120,
+        "stepover": 90,
+        "max_depth": 20,
+        "rpm": 18000,
+        "feed": 12000,
+        "z_feed": 3000,
+        "spindle_on": "M33",
+        "spindle_off": "M35",
+        "tool_notes": "M33,T2200,M63"
+      },
+      {
+        "tool_number": 3,
+        "name": "T23 D5",
+        "diameter": 5,
+        "bit_type": "flat",
+        "vbit_angle": 120,
+        "stepover": 90,
+        "max_depth": 20,
+        "rpm": 18000,
+        "feed": 12000,
+        "z_feed": 3000,
+        "spindle_on": "M33",
+        "spindle_off": "M35",
+        "tool_notes": "M33,T2300,M63"
+      },
+      {
+        "tool_number": 4,
+        "name": "T23 D15",
+        "diameter": 15,
+        "bit_type": "flat",
+        "vbit_angle": 120,
+        "stepover": 90,
+        "max_depth": 20,
+        "rpm": 18000,
+        "feed": 12000,
+        "z_feed": 3000,
+        "spindle_on": "M33",
+        "spindle_off": "M35",
+        "tool_notes": "M33,T2400,M63"
+      }
+    ]
   }
 ]

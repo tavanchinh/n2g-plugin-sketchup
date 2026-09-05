@@ -828,7 +828,7 @@ module N2G
                 spindle_off: sof.to_s.strip,
                 tool_notes:  tnt.to_s.strip,
                 stepover:    t["stepover"].to_f,
-                rpm:         t["rpm"].to_i,
+                rpm:         N2G::Settings.safe_rpm(t["rpm"]).to_i,
                 feed:        t["feed"].to_i,
                 z_feed:      t["z_feed"].to_i,
                 tool_number: t["tool_number"].to_i,

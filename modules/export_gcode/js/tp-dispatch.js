@@ -116,7 +116,10 @@ function tpSwitchSheet(idx){
   const keepMode = detailMode;  // giữ chế độ hiện tại
   // dừng animation nếu đang chạy
   if(typeof simStop==='function') simStop();
-  if(typeof simState!=='undefined') simState.enabledLayers=null;  // reset lọc layer cho tấm mới
+  if(typeof simState!=='undefined'){
+    simState.enabledLayers=null;  // reset lọc layer cho tấm mới
+    simState.availableLayers=null;
+  }
   openToolpathModal(sh);
   // openToolpathModal mặc định về 'order' — khôi phục lại chế độ đang xem
   if(keepMode && keepMode!=='order' && typeof setDetailMode==='function'){
@@ -903,6 +906,11 @@ function redrawToolpath(options){
     layerGroups[effLayer].push(v);
   });
   Object.entries(layerGroups).forEach(([layer,vecs])=>{
+    // Trong chế độ mô phỏng, checkbox layer điều khiển cả vector gốc lẫn
+    // toolpath. Các chế độ Thứ tự cắt/Chỉnh sửa không bị ảnh hưởng.
+    if(detailMode==='toolpath' && typeof simState!=='undefined' &&
+       simState.availableLayers && simState.availableLayers.has(layer) &&
+       simState.enabledLayers && !simState.enabledLayers.has(layer)) return;
     const col=getLayerColor(layer);
     ctx.strokeStyle=col+'99'; // 60% opacity
     ctx.lineWidth=dpr*1.2;
@@ -930,6 +938,9 @@ function redrawToolpath(options){
   if(!hideToolpath) tpRenderedPaths = [];
   if(detailMode==='toolpath' && !hideToolpath){
     TOOLS.forEach(tool=>{
+      if(typeof simState!=='undefined' && simState.availableLayers &&
+         simState.availableLayers.has(tool.layer) && simState.enabledLayers &&
+         !simState.enabledLayers.has(tool.layer)) return;
       // Lọc theo layer HIỆU LỰC (sau override chỉnh sửa), không phải layer gốc
       const vecs=s.display.filter(v=>{
         const eff=(typeof editEffectiveLayer==='function')?editEffectiveLayer(v, s.name):v.layer;

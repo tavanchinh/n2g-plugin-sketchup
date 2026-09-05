@@ -467,7 +467,7 @@ function n2gBuildProfilePathsForExport(){
   var out={};
   _n2gProfileExportWarnings=[];
   var engine=(typeof window!=='undefined' && window.N2G_PROFILE_OFFSET_ENGINE) || 'clipper';
-  if(engine==='legacy' || typeof SHEETS==='undefined' || typeof profileOffsetClipper!=='function') return out;
+  if(typeof SHEETS==='undefined' || typeof profileOffsetClipper!=='function') return out;
   SHEETS.forEach(function(sheet){
     (TOOLS||[]).filter(function(tool){
       var ln=(tool.layer||'').toUpperCase().replace(/[^A-Z0-9]/g,'');
@@ -485,6 +485,16 @@ function n2gBuildProfilePathsForExport(){
       });
       var islands=detectIslandJS(loops,bbs), records=[];
       loops.forEach(function(loop,li){
+        // CuttingLines represents closed part contours. A lone open edge that
+        // is shorter than the cutter is a stranded contour fragment, not a
+        // machinable profile. Do not create a legacy record for it.
+        var layerNorm=(tool.layer||'').toUpperCase().replace(/[^A-Z0-9]/g,'');
+        var isCuttingLayer=layerNorm.indexOf('CUTTINGLINES')>=0;
+        if(isCuttingLayer && !loop._closed && loop.length===1){
+          var lone=loop[0];
+          var loneLen=Math.hypot(lone.x2-lone.x1,lone.y2-lone.y1);
+          if(loneLen < (+tool.diameter||0)) return;
+        }
         var strategy=islands[li] ? 'cut_in' : tool.strategy;
         var circ=detectCircleJS(loop);
         var tooSmallCircle=!!circ && strategy==='cut_in' && circ.r <= (+tool.diameter||0)/2 + 0.001;
@@ -494,8 +504,8 @@ function n2gBuildProfilePathsForExport(){
           return;
         }
         var scopeOK=(typeof profileClipperAppliesJS==='function') ?
-          profileClipperAppliesJS(!!islands[li]) : !!islands[li];
-        var useClipper=scopeOK && !!loop._closed &&
+          profileClipperAppliesJS(!!islands[li],strategy) : !!islands[li];
+        var useClipper=scopeOK && !!loop._closed && (engine!=='legacy'||strategy==='cut_out') &&
           (strategy==='cut_in'||strategy==='cut_out') && !circ;
         var runs=useClipper ? profileOffsetClipper(loop,tool.diameter/2,strategy) : [];
         var clipperOK=useClipper && Array.isArray(runs) && runs.length>0;
@@ -505,29 +515,11 @@ function n2gBuildProfilePathsForExport(){
             mode='skip';
             runs=[];
           }else{
-            var halfD=(+tool.diameter||0)/2;
-            var fallback=offsetPolygonMiter(loop,-halfD,true);
-            if(Array.isArray(fallback) && fallback.length>=3){
-              runs=[fallback];
-              mode='js_offset';
-            }
-          }
-        }
-        if(strategy==='cut_out' && loop._closed && !circ &&
-           typeof profileHasMicroDetourJS==='function' && profileHasMicroDetourJS(loop,+tool.diameter||0)){
-          var legacyRun=offsetPolygonMiter(loop,-((+tool.diameter||0)/2),true);
-          var currentRuns=(mode==='clipper'||mode==='js_offset')?runs:[legacyRun];
-          var currentSafe=typeof profileCutOutRunSafeJS!=='function' ||
-            (currentRuns.length>0 && currentRuns.every(function(run){
-              return profileCutOutRunSafeJS(loop,run,(+tool.diameter||0)/2);
-            }));
-          if(!currentSafe){
-            runs=profileSafeCutOutClipperJS(loop,(+tool.diameter||0)/2);
-            if(runs.length){ mode='clipper'; }
-            else{
-              mode='skip'; runs=[];
-              _n2gProfileExportWarnings.push({sheet:sheet.name,layer:tool.layer,diameter:+tool.diameter||0});
-            }
+            // Exact cut_out failed: skip instead of emitting an approximate
+            // contour that can invade the vector or exceed the tool radius.
+            mode='skip';
+            runs=[];
+            _n2gProfileExportWarnings.push({sheet:sheet.name,layer:tool.layer,diameter:+tool.diameter||0});
           }
         }
         records.push({id:profileLoopIdJS(loop),key:profileLoopKeyJS(loop),strategy:strategy,

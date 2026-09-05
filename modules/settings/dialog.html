@@ -31,7 +31,6 @@
     .group-btn { padding:5px 14px;border:1px solid var(--border2);border-radius:20px;background:var(--bg3);color:var(--text2);font-size:11px;cursor:pointer;transition:all 0.15s;font-family:var(--sans); }
     .group-btn:hover { border-color:var(--accent);color:var(--accent);background:#e8f5ec; }
     .group-btn.active { border-color:var(--accent);background:#e8f5ec;color:var(--accent);font-weight:600; }
-    .group-info { font-size:10px;color:var(--text3);font-family:var(--mono); }
 
     /* Toolbar */
     .toolbar { padding:9px 18px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:7px;flex-shrink:0;background:var(--bg2); }
@@ -234,7 +233,6 @@
 <div id="group-bar">
   <span class="group-label">Nhóm máy:</span>
   <div id="group-buttons"><!-- JS inject --></div>
-  <div class="group-info" id="group-info"></div>
   <div style="margin-left:auto;display:flex;gap:6px">
     <button class="tbtn" style="font-size:10px;padding:2px 8px" onclick="addGroup()">+ Thêm nhóm</button>
     <button class="tbtn" style="font-size:10px;padding:2px 8px" onclick="renameGroup()">✎ Đổi tên</button>
@@ -288,10 +286,17 @@ let ACTIVE_GROUP = null;
 let selectedRow  = -1;
 let isDirty      = false;
 
+function safeRpm(value) {
+  const rpm = Number(value);
+  return Number.isFinite(rpm) && rpm > 0 ? rpm : 17000;
+}
+
 // ── Init (Ruby → JS) ──
 function n2gToolsInit(tools, groups, activeGroupId) {
   TOOLS  = tools  || [];
   GROUPS = groups || [];
+  GROUPS.forEach(g => (g.tools || []).forEach(t => { t.rpm = safeRpm(t.rpm); }));
+  TOOLS.forEach(t => { t.rpm = safeRpm(t.rpm); });
   renderGroupButtons(activeGroupId);
   // Auto load tools từ active group
   if (ACTIVE_GROUP && ACTIVE_GROUP.tools && ACTIVE_GROUP.tools.length > 0) {
@@ -313,7 +318,6 @@ function renderGroupButtons(activeId) {
   `).join('');
 
   ACTIVE_GROUP = GROUPS.find(g => g.id === activeId) || GROUPS[0];
-  updateGroupInfo();
 }
 
 async function switchGroup(groupId) {
@@ -339,7 +343,6 @@ async function switchGroup(groupId) {
   const btn = document.getElementById('grp-' + groupId);
   if (btn) btn.classList.add('active');
   ACTIVE_GROUP = GROUPS.find(g => g.id === groupId);
-  updateGroupInfo();
   sketchup.switch_group_callback(groupId);
   // Auto load tools từ nhóm
   if (ACTIVE_GROUP) {
@@ -349,12 +352,6 @@ async function switchGroup(groupId) {
     render();
     setStatus('ok', `Đã load ${TOOLS.length} dao từ nhóm "${ACTIVE_GROUP.name}"`);
   }
-}
-
-function updateGroupInfo() {
-  if (!ACTIVE_GROUP) return;
-  document.getElementById('group-info').textContent =
-    `${ACTIVE_GROUP.machine}  ·  ${ACTIVE_GROUP.spindles} đầu dao`;
 }
 
 async function loadFromGroup() {
@@ -407,7 +404,7 @@ function render() {
       }</td>
       <td><input class="cell-input" type="number" value="${t.stepover||90}"      onchange="update(${i},'stepover',+this.value)"   onclick="e(event)" min="0" max="100"></td>
       <td><input class="cell-input" type="number" value="${t.max_depth||20}"    onchange="update(${i},'max_depth',+this.value)"  onclick="e(event)" step="0.5"></td>
-      <td><input class="cell-input" type="number" value="${t.rpm||18000}"        onchange="update(${i},'rpm',+this.value)"        onclick="e(event)" step="500"></td>
+      <td><input class="cell-input" type="number" value="${safeRpm(t.rpm)}"       onchange="update(${i},'rpm',safeRpm(this.value));this.value=TOOLS[${i}].rpm" onclick="e(event)" step="500"></td>
       <td><input class="cell-input" type="number" value="${t.feed||2000}"        onchange="update(${i},'feed',+this.value)"       onclick="e(event)" step="50"></td>
       <td><input class="cell-input" type="number" value="${t.z_feed||600}"       onchange="update(${i},'z_feed',+this.value)"     onclick="e(event)" step="50"></td>
       <td><input class="cell-input" type="text" value="${esc(t.spindle_on||'')}"  onchange="update(${i},'spindle_on',this.value.trim())"  onclick="e(event)" style="text-align:center" title="Để trống = dùng mặc định post. Nhiều lệnh: ngăn bởi dấu phẩy, vd M33,M70"></td>
@@ -431,6 +428,7 @@ function vbitMaxDepth(diameter, angle) {
 }
 
 function update(i, field, val) {
+  if (field === 'rpm') val = safeRpm(val);
   TOOLS[i][field] = val;
 
   // Dòng vừa thêm mới (_isNew): sửa Ø sẽ tự cập nhật feed/z_feed theo bảng tra.
@@ -551,7 +549,7 @@ function openToolEditor(i) {
   v('te-vbit_angle',  t.vbit_angle || 120);
   v('te-stepover',    t.stepover != null ? t.stepover : 90);
   v('te-max_depth',   t.max_depth != null ? Math.abs(t.max_depth) : 20);
-  v('te-rpm',         t.rpm || 18000);
+  v('te-rpm',         safeRpm(t.rpm));
   v('te-feed',        t.feed || 2000);
   v('te-z_feed',      t.z_feed || 600);
   v('te-spindle_on',  t.spindle_on || '');
@@ -582,7 +580,7 @@ function closeToolEditor(apply) {
     t.vbit_angle  = Math.max(1, Math.min(179, num('te-vbit_angle') || 120));
     t.stepover    = num('te-stepover');
     t.max_depth   = Math.abs(num('te-max_depth')) || 20;
-    t.rpm         = num('te-rpm');
+    t.rpm         = safeRpm(num('te-rpm'));
     t.feed        = num('te-feed');
     t.z_feed      = num('te-z_feed');
     t.spindle_on  = str('te-spindle_on');
@@ -602,6 +600,7 @@ function saveTools() {
   if (!ACTIVE_GROUP) { setStatus('error','Chưa chọn nhóm'); return; }
   ACTIVE_GROUP.tools = TOOLS.map(t => {
     const clean = JSON.parse(JSON.stringify(t));
+    clean.rpm = safeRpm(clean.rpm);
     delete clean._isNew; // cờ tạm chỉ dùng trong session UI, không lưu vào file
     return clean;
   });

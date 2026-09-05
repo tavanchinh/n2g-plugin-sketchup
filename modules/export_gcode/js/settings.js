@@ -542,6 +542,9 @@ function n2gSetDetectedGap(gap){
 
 function n2gReloadToolGroups(groups, toolsList){
   ALL_TOOL_GROUPS = groups || [];
+  ALL_TOOL_GROUPS.forEach(function(group){
+    (group.tools||[]).forEach(function(tool){ tool.rpm=n2gSafeRpm(tool.rpm); });
+  });
   ALL_TOOLS_LIST  = toolsList || [];
   renderToolTable();
 }
@@ -617,7 +620,7 @@ function updateToolName(idx, name, selectEl){
   if(found){
     if(found.diameter   !== undefined) TOOLS[idx].diameter    = found.diameter;
     if(found.tool_number!== undefined) TOOLS[idx].tool_number = found.tool_number;
-    if(found.rpm        !== undefined) TOOLS[idx].rpm         = found.rpm;
+    TOOLS[idx].rpm = n2gSafeRpm(found.rpm);
     if(found.feed       !== undefined && found.feed>0)   TOOLS[idx].feed   = found.feed;
     if(found.z_feed     !== undefined && found.z_feed>0) TOOLS[idx].z_feed = found.z_feed;
     if(found.stepover   !== undefined) TOOLS[idx].stepover    = found.stepover;

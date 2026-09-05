@@ -126,15 +126,10 @@ function drawToolpathProfile(ctx,vecs,tool,tx,ty,sc,dpr){
       var profileClipperExtra=[];
       var profileEngine=(typeof window!=='undefined' && window.N2G_PROFILE_OFFSET_ENGINE) || 'clipper';
       var profileScopeOK=(typeof profileClipperAppliesJS==='function') ?
-        profileClipperAppliesJS(!!isIsland[li]) : !!isIsland[li];
-      if(loop._closed && profileEngine!=='legacy' && profileScopeOK &&
+        profileClipperAppliesJS(!!isIsland[li],strategy) : !!isIsland[li];
+      if(loop._closed && (profileEngine!=='legacy'||strategy==='cut_out') && profileScopeOK &&
          (strategy==='cut_in'||strategy==='cut_out') && typeof profileOffsetClipper==='function'){
         var profileClipperRuns=profileOffsetClipper(loop,tool.diameter/2,strategy);
-        var hasMicroDetour=strategy==='cut_out'&&typeof profileHasMicroDetourJS==='function'&&
-          profileHasMicroDetourJS(loop,tool.diameter);
-        if(hasMicroDetour && typeof profileCutOutRunSafeJS==='function'){
-          profileClipperRuns=profileClipperRuns.filter(function(run){return profileCutOutRunSafeJS(loop,run,tool.diameter/2);});
-        }
         if(profileClipperRuns.length){
           offPts=profileClipperRuns[0];
           profileClipperExtra=profileClipperRuns.slice(1);
@@ -142,33 +137,13 @@ function drawToolpathProfile(ctx,vecs,tool,tx,ty,sc,dpr){
           // Clipper co vao rong = dao khong lot. Khong fallback miter.
           return;
         }else{
-          offPts=offsetPolygonMiter(loop,-offsetDist,strategy==='cut_out');
-          if(hasMicroDetour && typeof profileCutOutRunSafeJS==='function' &&
-             !profileCutOutRunSafeJS(loop,offPts,tool.diameter/2)){
-            var safeClipperFallback=profileSafeCutOutClipperJS(loop,tool.diameter/2);
-            if(!safeClipperFallback.length){
-              if(typeof profileLogRejectedMicroCutOutJS==='function') profileLogRejectedMicroCutOutJS(loop,tool);
-              return;
-            }
-            offPts=safeClipperFallback[0];
-            profileClipperExtra=safeClipperFallback.slice(1);
-          }
+          // Never approximate a closed cut_out when exact offset failed.
+          return;
         }
       } else if(loop._closed){
         // Bo cung góc nhọn CHỈ khi cắt NGOÀI (khớp Ruby write_profile): cung nằm ngoài
         // vật liệu nên an toàn. Cắt TRONG giữ miter để dao không lẹm vào biên dạng.
         offPts=offsetPolygonMiter(loop, -offsetDist, strategy==='cut_out');
-        if(strategy==='cut_out' && typeof profileHasMicroDetourJS==='function' &&
-           profileHasMicroDetourJS(loop,tool.diameter) && typeof profileCutOutRunSafeJS==='function' &&
-           !profileCutOutRunSafeJS(loop,offPts,tool.diameter/2)){
-          var safeFallback=profileSafeCutOutClipperJS(loop,tool.diameter/2);
-          if(!safeFallback.length){
-            if(typeof profileLogRejectedMicroCutOutJS==='function') profileLogRejectedMicroCutOutJS(loop,tool);
-            return;
-          }
-          offPts=safeFallback[0];
-          profileClipperExtra=safeFallback.slice(1);
-        }
       } else {
         // Loop hở (C/L/U): offset theo TÂM bbox — cut_out ra xa tâm, cut_in gần tâm.
         // Khớp Ruby write_profile is_open. Không phụ thuộc chiều vẽ.

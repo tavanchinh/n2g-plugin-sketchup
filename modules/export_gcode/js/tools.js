@@ -1,9 +1,19 @@
+function n2gSafeRpm(value){
+  var rpm=Number(value);
+  return isFinite(rpm) && rpm>0 ? rpm : 17000;
+}
+
 function n2gInit(sheets,tools,posts,defaultPost,allLayers,allToolsList,toolGroups,noNesting){
   SHEETS=[];  // reset — sẽ được fill bởi n2gAddSheet
-  TOOLS=tools.map(function(t){ return Object.assign({},t,{tool_number:t.tool_number||null}); });
+  TOOLS=tools.map(function(t){
+    return Object.assign({},t,{tool_number:t.tool_number||null,rpm:n2gSafeRpm(t.rpm)});
+  });
   ALL_LAYERS=(allLayers||[]).map(function(l){ return normalizeLayer(l); });
   ALL_TOOLS_LIST=allToolsList||[];
   ALL_TOOL_GROUPS=toolGroups||[];
+  ALL_TOOL_GROUPS.forEach(function(group){
+    (group.tools||[]).forEach(function(tool){ tool.rpm=n2gSafeRpm(tool.rpm); });
+  });
   posts.forEach(function(p){ PRESETS[p.id]=p; });
   buildPresetBar(posts,defaultPost);
   loadPreset(defaultPost);
@@ -165,7 +175,7 @@ function renderToolTable(){
       <td><input class="tf" type="number" value="${t.stepover}" min="10" max="100" step="1" data-field="stepover"
         onchange="TOOLS[${i}].stepover=Math.min(100,Math.max(10,+this.value));this.value=TOOLS[${i}].stepover"
         onclick="event.stopPropagation()"></td>
-      <td><input class="tf" type="number" value="${t.rpm}" step="500" data-field="rpm" onchange="TOOLS[${i}].rpm=+this.value" onclick="event.stopPropagation()"></td>
+      <td><input class="tf" type="number" value="${n2gSafeRpm(t.rpm)}" step="500" data-field="rpm" onchange="TOOLS[${i}].rpm=n2gSafeRpm(this.value);this.value=TOOLS[${i}].rpm" onclick="event.stopPropagation()"></td>
       <td>${t.type==='drill'
         ? '<span style="color:var(--text3);font-size:11px;padding:0 9px">—</span>'
         : `<input class="tf" type="number" value="${t.feed}" step="50" data-field="feed" onchange="TOOLS[${i}].feed=+this.value" onclick="event.stopPropagation()">`
@@ -275,7 +285,7 @@ function openLayerToolEditor(i){
             fieldNum('lte-stepover','Bước qua — Stepover (%)', t.stepover, '1', '10', '100')+
             fieldNum('lte-feed','F.xy — Tốc độ cắt (mm/ph)', t.feed, '50')+
             fieldNum('lte-z_feed','F.z — Tốc độ xuống Z (mm/ph)', t.z_feed, '50')+
-            fieldNum('lte-rpm','Tốc độ trục (RPM)', t.rpm, '500')+
+            fieldNum('lte-rpm','Tốc độ trục (RPM)', n2gSafeRpm(t.rpm), '500')+
           '</div>'+
         '</div>'+
 
@@ -544,7 +554,7 @@ function closeLayerToolEditor(apply){
     t.depth      = val('lte-depth');
     t.stepover   = Math.min(100, Math.max(10, numv('lte-stepover')||90));
     t.max_depth  = Math.abs(numv('lte-max_depth')) || 20;
-    t.rpm        = numv('lte-rpm');
+    t.rpm        = n2gSafeRpm(numv('lte-rpm'));
     t.feed       = numv('lte-feed');
     t.z_feed     = numv('lte-z_feed');
     var tn = numv('lte-tool_number');
@@ -914,6 +924,9 @@ function flushAll(){
         TOOLS[i][field] = Math.max(1, Math.floor(+val||1));
       } else if(field === 'depth'){
         // depth handled by validateDepth
+      } else if(field === 'rpm'){
+        TOOLS[i][field] = n2gSafeRpm(val);
+        inp.value = TOOLS[i][field];
       } else {
         TOOLS[i][field] = +val;
       }
@@ -1006,6 +1019,7 @@ function loadToolPreset(id,el,isInit){
   const p=TOOL_PRESETS.find(p=>String(p.id)===String(id));if(!p)return;
   // Validate depth
   const tools = JSON.parse(JSON.stringify(p.tools)).map(t=>{
+    t.rpm = n2gSafeRpm(t.rpm);
     if(Math.abs(+t.depth) > 200) t.depth = 17.1;
     // Fix giá trị feed bị lưu sai (< 100 → nhân 1000)
     if(t.z_feed && +t.z_feed < 100) t.z_feed = +t.z_feed * 1000;
