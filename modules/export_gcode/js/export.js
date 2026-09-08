@@ -420,6 +420,9 @@ function doExport(){
   // UI.messagebox của SketchUp vẫn xử lý event khi đang mở. Chặn callback
   // lặp gửi thêm yêu cầu xuất và tạo nhiều hộp cảnh báo lồng nhau.
   if(_n2gExportInFlight) return;
+  // Một lần bấm Xuất mới bắt đầu một phiên cảnh báo mới. Không reset khi đóng
+  // modal, vì callback tồn đọng của cùng phiên có thể về muộn.
+  _n2gPocketValidationDialogOpen = false;
   _n2gExportInFlight = true;
   setStatus('busy', 'Đang xuất G-code...');
   // Overlay đã hiện từ confirmAndExport. Đảm bảo vẫn hiện (phòng đường gọi khác).
@@ -619,6 +622,24 @@ function n2gExportDone(ok, folder, sheetCount){
   } else {
     setStatus('error', 'Xuất thất bại — xem Ruby Console');
   }
+}
+
+// Validation Pocket từ Ruby chỉ được hiển thị bằng một modal HTML. Cờ này là
+// lớp bảo vệ cuối nếu WebDialog/SketchUp vô tình phát cùng callback nhiều lần.
+var _n2gPocketValidationDialogOpen = false;
+function n2gShowPocketValidationError(message){
+  _n2gExportInFlight = false;
+  var btn=document.getElementById('btn-export'); if(btn) btn.disabled=false;
+  var ov=document.getElementById('overlay'); if(ov) ov.style.display='none';
+  setStatus('error','Không thể xuất: thiếu đường chạy Pocket an toàn');
+  if(_n2gPocketValidationDialogOpen) return;
+  _n2gPocketValidationDialogOpen=true;
+  var body='<div style="white-space:pre-line;max-height:300px;overflow:auto">'+
+    esc(message||'Không có đường chạy Pocket hợp lệ từ JS/Clipper.')+'</div>';
+  Promise.resolve(showGConfirm(
+    'Không thể tạo đường chạy Pocket', body,
+    [{label:'Đóng và kiểm tra lại',value:'close',kind:'primary'}], 'warn'
+  ));
 }
 
 var _exportDoneFolder = null;

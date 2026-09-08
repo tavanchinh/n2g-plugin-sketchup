@@ -324,6 +324,8 @@ module N2G
 
               all_layers = all_sheets.flat_map { |s| s[:vectors].map { |v| v[:layer] } }
                                      .uniq.sort.reject { |l| l.nil? || l.empty? }
+              layer_colors = Scanner.last_layer_colors
+              dlg.execute_script("window.N2G_LAYER_COLORS=#{layer_colors.to_json}")
 
               # Đổ từng sheet (tránh buffer overflow máy yếu)
               all_sheets.each_with_index do |sheet, i|
@@ -1001,8 +1003,12 @@ module N2G
                 dlg.execute_script("n2gExportDone(false)")
               end
              rescue => te
-               UI.messagebox("Lỗi xuất:\n#{te.message}\n#{te.backtrace.first(3).join("\n")}")
-               dlg.execute_script("n2gExportDone(false)")
+               if te.is_a?(N2G::ExportGcode::PostProcessor::PocketPathsValidationError)
+                 dlg.execute_script("n2gShowPocketValidationError(#{te.message.to_json})")
+               else
+                 UI.messagebox("Lỗi xuất:\n#{te.message}\n#{te.backtrace.first(3).join("\n")}")
+                 dlg.execute_script("n2gExportDone(false)")
+               end
              ensure
                @export_gcode_busy = false
              end

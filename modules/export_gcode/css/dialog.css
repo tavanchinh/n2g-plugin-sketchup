@@ -40,7 +40,7 @@ input,select,textarea,button{font-family:var(--sans);font-size:calc(var(--base-f
 .layer-item.hidden-layer{opacity:0.4}
 .layer-item.layer-no-tool .layer-name{color:var(--text3)}
 .layer-warn{font-size:9px;color:var(--text3);background:var(--border2);border-radius:3px;padding:0px 4px;flex-shrink:0;font-weight:600}
-.layer-dot{width:8px;height:8px;border-radius:50%;flex-shrink:0}
+.layer-dot{width:8px;height:8px;border-radius:50%;flex-shrink:0;border:1px solid rgba(0,0,0,.22);box-sizing:border-box}
 .layer-name{flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .layer-eye{font-size:10px;opacity:0.4;flex-shrink:0}
 .layer-item:hover .layer-eye{opacity:0.8}

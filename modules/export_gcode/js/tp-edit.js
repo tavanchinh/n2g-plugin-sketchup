@@ -153,7 +153,8 @@ function editBuildLayerList(){
   var html='';
   names.forEach(function(ly){
     var checked=!editHiddenLayers.has(ly);
-    var col=(typeof getLayerColor==='function')?getLayerColor(ly):'#888';
+    var col=(typeof getCanvasLayerColor==='function')?getCanvasLayerColor(ly):
+      ((typeof getLayerColor==='function')?getLayerColor(ly):'#888');
     html+='<div class="edit-layer-item">'
       +'<input type="checkbox" '+(checked?'checked':'')+' onchange="editToggleLayer(\''+ly.replace(/'/g,"\\'")+'\',this.checked)">'
       +'<span class="el-swatch" style="background:'+col+'"></span>'

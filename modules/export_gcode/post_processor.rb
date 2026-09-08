@@ -8,6 +8,11 @@ module N2G
   module ExportGcode
     module PostProcessor
 
+      # Lỗi validation dữ liệu Pocket từ JS. Tách loại lỗi này khỏi lỗi hệ
+      # thống để Dialogs có thể hiển thị đúng một modal HTML, không dùng chuỗi
+      # UI.messagebox có khả năng tái nhập event loop của SketchUp.
+      class PocketPathsValidationError < StandardError; end
+
       # Tách chuỗi nhiều lệnh (ngăn bởi dấu phẩy hoặc "/n") thành nhiều dòng.
       # Ví dụ: "M35,M70,M24" hoặc "M35/nM70/nM24" → "M35\nM70\nM24"
       # Người dùng low-tech: gõ liền, dùng , hoặc /n để xuống dòng.
@@ -127,6 +132,7 @@ module N2G
 
       def self.validate_pocket_paths!(all_sheets, tool_library, app_settings)
         pocket_paths = app_settings[:pocket_paths]
+        invalid_items = []
         all_sheets.each do |sheet|
           sheet[:vectors].group_by { |v| v[:layer] }.each_key do |layer|
             cfg = tool_jobs_for_layer(tool_library, app_settings, layer)
@@ -167,8 +173,15 @@ module N2G
               next
             end
 
-            raise "Không có đường chạy Pocket hợp lệ từ JS/Clipper cho sheet '#{sheet[:name]}', layer '#{layer}'. Hãy mở lại giao diện và kiểm tra preview trước khi xuất."
+            invalid_items << "Sheet '#{sheet[:name]}', layer '#{layer}'"
           end
+        end
+
+        unless invalid_items.empty?
+          raise PocketPathsValidationError,
+                "Không có đường chạy Pocket hợp lệ từ JS/Clipper:\n" \
+                "#{invalid_items.uniq.map { |item| "- #{item}" }.join("\n")}\n" \
+                "Hãy mở lại giao diện và kiểm tra preview trước khi xuất."
         end
 
         true

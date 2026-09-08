@@ -911,7 +911,7 @@ function redrawToolpath(options){
     if(detailMode==='toolpath' && typeof simState!=='undefined' &&
        simState.availableLayers && simState.availableLayers.has(layer) &&
        simState.enabledLayers && !simState.enabledLayers.has(layer)) return;
-    const col=getLayerColor(layer);
+    const col=(typeof getCanvasLayerColor==='function') ? getCanvasLayerColor(layer) : getLayerColor(layer);
     ctx.strokeStyle=col+'99'; // 60% opacity
     ctx.lineWidth=dpr*1.2;
     ctx.setLineDash([]);
@@ -926,7 +926,7 @@ function redrawToolpath(options){
       if(!v.is_drill_center) return;
       const effLayer = (typeof editEffectiveLayer==='function') ? editEffectiveLayer(v, s.name) : v.layer;
       if(detailMode==='edit' && editHiddenLayers && editHiddenLayers.has(effLayer)) return;
-      const col=getLayerColor(effLayer);
+      const col=(typeof getCanvasLayerColor==='function') ? getCanvasLayerColor(effLayer) : getLayerColor(effLayer);
       const cx=(v.x1+v.x2)/2, cy=(v.y1+v.y2)/2;
       const r=Math.max((v.diameter||5)/2*sc*dpr, 1*dpr);
       ctx.beginPath(); ctx.arc(tx(cx),ty(cy),r,0,Math.PI*2);

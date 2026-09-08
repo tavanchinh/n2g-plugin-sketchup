@@ -4,11 +4,23 @@
 // chức năng thứ tự cắt/xem đường dao nay nằm trong modal "Chi tiết" (tp-dispatch.js).
 // Card preview KHÔNG còn vẽ số thứ tự cắt (chỉ hiện khi mở modal Chi tiết).
 
+// Màu quy ước dùng chung cho sidebar, legend và vector gốc trên canvas.
+// Không dùng cho toolpath: đường dao vẫn giữ màu của dao được cấu hình.
+const N2G_FIXED_LAYER_COLORS = {
+  ABF_CUTTINGLINES: '#999900', // RGB(153,153,0)
+  ABF_MARK_SQUARE:  '#0000FF', // RGB(0,0,255)
+  ABF_PART_BORDER:  '#CC66CC'  // RGB(204,102,204)
+};
+function getCanvasLayerColor(layerName){
+  return N2G_FIXED_LAYER_COLORS[layerName] ||
+    ((window.N2G_LAYER_COLORS&&window.N2G_LAYER_COLORS[layerName]) || getLayerColor(layerName));
+}
+
 function renderLegend(container, layers) {
   container.innerHTML = '<span style="font-size:9px;color:var(--text3);letter-spacing:1px;text-transform:uppercase;margin-right:6px;flex-shrink:0">Layers</span>';
   layers.forEach(l => {
     const hidden = hiddenLayers.has(l);
-    const color  = getLayerColor(l);
+    const color  = getCanvasLayerColor(l);
     const chip   = document.createElement('div');
     chip.dataset.layer = l;
     chip.title = hidden ? 'Click để hiện' : 'Click để ẩn';
@@ -139,12 +151,15 @@ function renderSheets(){
 
   const renderLayerItem = (l) => {
     const color   = getLayerColor(l);
+    // Màu quy ước của các layer hệ thống trong preview-sidebar. Các layer
+    // khác vẫn hiển thị màu Layer/Tag thật đọc từ SketchUp.
+    const tagColor = getCanvasLayerColor(l);
     const ign     = IGNORED_LAYERS.has(l);
     const hasTool = SYSTEM_IGNORED_LAYERS.has(l) || TOOLS.some(function(t){ return t.layer === l; });
     const item    = document.createElement('div');
     item.className = 'layer-item' + (ign ? ' hidden-layer' : '') + (hasTool ? '' : ' layer-no-tool');
     item.dataset.layer = l;
-    item.innerHTML = `<div class="layer-dot" style="background:${color}"></div>
+    item.innerHTML = `<div class="layer-dot" style="background:${tagColor}" title="Màu Layer/Tag SketchUp: ${tagColor}"></div>
       <span class="layer-name" title="${l}">${l}</span>
       ${hasTool ? '' : '<span class="layer-warn" title="Chưa được gán dao">?</span>'}
       <span class="layer-focus" title="Tìm vị trí trên tấm" onclick="event.stopPropagation();focusLayer('${l.replace(/'/g,"\\'")}')"><svg viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><circle cx="7" cy="7" r="4.5"/><line x1="10.5" y1="10.5" x2="14" y2="14"/></svg></span>
@@ -325,17 +340,18 @@ function drawSheet(cv,s,CW,CH){
   // 1. SheetBorder: fill xám nhạt = tấm ván
   borderLayers.forEach(l=>{
     const vecs=getVecs(l);
+    const color=getCanvasLayerColor(l);
     const poly=buildPolygon(vecs,tx,ty);
     if(poly){
       ctx.beginPath();ctx.moveTo(poly[0][0],poly[0][1]);
       poly.slice(1).forEach(p=>ctx.lineTo(p[0],p[1]));
       ctx.closePath();
       ctx.fillStyle='#e4e4e0';ctx.fill();
-      ctx.strokeStyle='#a8a8a0';ctx.lineWidth=0.8;ctx.stroke();
+      ctx.strokeStyle=color;ctx.lineWidth=0.8;ctx.stroke();
     } else {
       // An incomplete border must not be force-closed with an invented
       // diagonal. Preserve the source geometry by drawing its edges directly.
-      ctx.strokeStyle='#a8a8a0';ctx.lineWidth=0.8;
+      ctx.strokeStyle=color;ctx.lineWidth=0.8;
       vecs.forEach(v=>{
         ctx.beginPath();ctx.moveTo(tx(v.x1),ty(v.y1));
         ctx.lineTo(tx(v.x2),ty(v.y2));ctx.stroke();
@@ -347,7 +363,7 @@ function drawSheet(cv,s,CW,CH){
   // Gom theo closed polygon riêng biệt
   cuttingLayers.forEach(l=>{
     const vecs=getVecs(l);
-    const color=getLayerColor(l);
+    const color=getCanvasLayerColor(l);
     // Thử fill polygon — nếu thành công tấm con sẽ nổi lên nền trắng
     const groups=buildLoopsJS(vecs);
     groups.forEach(group=>{
@@ -372,7 +388,7 @@ function drawSheet(cv,s,CW,CH){
   // 3. Other layers (edgeBanding, ranhHau, MONG...) — mỗi layer 1 màu
   otherLayers.forEach(l=>{
     const vecs=getVecs(l);
-    const color=getLayerColor(l);
+    const color=getCanvasLayerColor(l);
     ctx.strokeStyle=color;ctx.lineWidth=0.9;ctx.setLineDash([]);
     vecs.forEach(v=>{ctx.beginPath();ctx.moveTo(tx(v.x1),ty(v.y1));ctx.lineTo(tx(v.x2),ty(v.y2));ctx.stroke()});
   });
@@ -380,8 +396,9 @@ function drawSheet(cv,s,CW,CH){
   // 4. Label — mờ nhẹ để không rối mắt nhưng vẫn đọc được
   labelLayers.forEach(l=>{
     const vecs=getVecs(l);
+    const color=getCanvasLayerColor(l);
     ctx.save();ctx.globalAlpha=0.45;
-    ctx.strokeStyle='#606060';ctx.lineWidth=0.6;ctx.setLineDash([]);
+    ctx.strokeStyle=color;ctx.lineWidth=0.6;ctx.setLineDash([]);
     vecs.forEach(v=>{ctx.beginPath();ctx.moveTo(tx(v.x1),ty(v.y1));ctx.lineTo(tx(v.x2),ty(v.y2));ctx.stroke()});
     ctx.setLineDash([]);ctx.restore();
   });
@@ -390,7 +407,7 @@ function drawSheet(cv,s,CW,CH){
   const drawnDrills=new Set();
   drillLayers.forEach(l=>{
     const vecs=getVecsAll(l);
-    const color=getLayerColor(l);
+    const color=getCanvasLayerColor(l);
     const rReal=((vecs[0]||{}).diameter||6)*sc/2;
     const r=Math.max(2.5,Math.min(rReal,7));
     vecs.forEach(v=>{

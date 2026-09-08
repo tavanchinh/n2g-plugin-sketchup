@@ -492,7 +492,32 @@ function profileExactCutOutOffsetJS(loop,halfD){
     var p1={x:v.x+np.nx*halfD,y:v.y+np.ny*halfD};
     var p2={x:v.x+nc.nx*halfD,y:v.y+nc.ny*halfD};
     var hit=lineIntersection(p1,{x:np.dx,y:np.dy},p2,{x:nc.dx,y:nc.dy});
-    out.push(hit||{x:(p1.x+p2.x)/2,y:(p1.y+p2.y)/2});
+    if(!hit){
+      out.push({x:(p1.x+p2.x)/2,y:(p1.y+p2.y)/2});
+      continue;
+    }
+
+    // Do not let a sharp convex corner extend either offset edge farther than
+    // the cutter radius. A 90-degree corner extends exactly halfD and remains
+    // square; a sharper corner follows a radius-halfD arc on the waste side.
+    var cross=np.dx*nc.dy-np.dy*nc.dx;
+    var convex=cross*side>1e-10;
+    var d1=Math.hypot(hit.x-p1.x,hit.y-p1.y);
+    var d2=Math.hypot(hit.x-p2.x,hit.y-p2.y);
+    if(convex && (d1>halfD+1e-7 || d2>halfD+1e-7)){
+      var a1=Math.atan2(p1.y-v.y,p1.x-v.x);
+      var a2=Math.atan2(p2.y-v.y,p2.x-v.x);
+      var da=a2-a1;
+      while(da<=-Math.PI) da+=2*Math.PI;
+      while(da>Math.PI) da-=2*Math.PI;
+      var steps=Math.max(Math.ceil(Math.abs(da)/(Math.PI/12)),1);
+      for(var k=0;k<=steps;k++){
+        var a=a1+da*k/steps;
+        out.push({x:v.x+Math.cos(a)*halfD,y:v.y+Math.sin(a)*halfD});
+      }
+    }else{
+      out.push(hit);
+    }
   }
   return out;
 }

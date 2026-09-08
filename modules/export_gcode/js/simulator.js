@@ -477,7 +477,8 @@ function simBuildLayerList(){
     // Khởi tạo: mặc định bật hết
     if(simState.enabledLayers && !simState.enabledLayers.has(ly)) { /* giữ trạng thái cũ */ }
     const checked = !simState.enabledLayers || simState.enabledLayers.has(ly);
-    const col=(typeof getLayerColor==='function')?getLayerColor(ly):'#888';
+    const col=(typeof getCanvasLayerColor==='function')?getCanvasLayerColor(ly):
+      ((typeof getLayerColor==='function')?getLayerColor(ly):'#888');
     html+='<label class="sim-layer-item">'
       +'<input type="checkbox" '+(checked?'checked':'')+' onchange="simToggleLayer(\''+ly.replace(/'/g,"\\'")+'\',this.checked)">'
       +'<span class="sim-swatch" style="background:'+col+'"></span>'

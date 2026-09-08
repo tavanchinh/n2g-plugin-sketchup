@@ -621,7 +621,37 @@ module N2G
         puts "N2G resolve_missing_sheet_names error: #{e.message}"
       end
 
+      # Màu Layer/Tag của lần scan gần nhất, key đã normalize giống vector.layer.
+      # Metadata chỉ phục vụ UI; không chèn vào vectors/display nên không đổi
+      # cấu trúc hình học hoặc dữ liệu G-code.
+      def self.last_layer_colors
+        @last_layer_colors || {}
+      end
+
       def self.scan_model(model, tool_library)
+        # DEBUG tạm thời: đọc màu thật của Layer/Tag từ SketchUp, chưa đưa vào
+        # vectors/display hay thay đổi JSON. Chỉ in layer mới hoặc màu đã đổi để
+        # scan_model được gọi nhiều lần không làm ngập Ruby Console.
+        @logged_layer_colors ||= {}
+        @last_layer_colors = {}
+        model.layers.each do |layer|
+          begin
+            c = layer.color
+            rgba = c ? [c.red, c.green, c.blue, (c.alpha rescue 255)] : nil
+            hex = rgba ? format('#%02X%02X%02X', rgba[0], rgba[1], rgba[2]) : nil
+            norm_name = GcodeEngine.normalize_layer(layer.name)
+            @last_layer_colors[norm_name] = hex if hex
+            signature = [hex, rgba && rgba[3], layer.visible?]
+            next if @logged_layer_colors[layer.name.to_s] == signature
+            @logged_layer_colors[layer.name.to_s] = signature
+            puts "[N2G LAYER COLOR DEBUG] name=#{layer.name.to_s.inspect} " \
+                 "normalized=#{norm_name.inspect} " \
+                 "hex=#{hex.inspect} rgba=#{rgba.inspect} visible=#{layer.visible?}"
+          rescue => e
+            puts "[N2G LAYER COLOR DEBUG] name=#{layer.name.to_s.inspect} error=#{e.message.inspect}"
+          end
+        end
+
         map = {}
         build_nesting_map(model.entities, Geom::Transformation.new, map, false)
 

@@ -34,6 +34,7 @@ let SHEETS=[],TOOLS=[],PRESETS={};
 let N2G_SAVE_HISTORY=true;  // bật/tắt lưu lịch sử gia công
 let hiddenLayers=new Set();
 let ALL_LAYERS=[],ALL_TOOLS_LIST=[],ALL_TOOL_GROUPS=[];
+window.N2G_LAYER_COLORS=window.N2G_LAYER_COLORS||{};
 
 function n2gSetAllLayers(layers){
   ALL_LAYERS = (layers||[]).map(function(l){ return normalizeLayer(l); });
