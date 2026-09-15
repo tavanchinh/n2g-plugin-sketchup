@@ -127,6 +127,37 @@ function tpSwitchSheet(idx){
   }
 }
 
+// Review a Profile omitted during export. The source loop is retained only in
+// the JS warning; no offset path exists to highlight for a skipped operation.
+function tpFocusProfileWarning(warning){
+  if(!warning || !warning.bbox || !warning.loop) return;
+  var sheet=(typeof SHEETS!=='undefined' ? SHEETS : []).find(function(s){
+    return s.name===warning.sheet;
+  });
+  if(!sheet) return;
+  // simStop() redraws the current canvas; before the first modal opens there
+  // is no tpZm.sheet yet, so only stop a running animation without redrawing.
+  if(tpZm && tpZm.sheet && typeof simStop==='function') simStop();
+  else if(typeof simPause==='function') simPause();
+  if(typeof simState!=='undefined'){
+    simState.enabledLayers=null;
+    simState.availableLayers=null;
+  }
+  openToolpathModal(sheet);
+  tpZm.profileWarning=warning;
+  var b=warning.bbox, pad=20;
+  var baseSc=Math.min((tpZm.cw-pad*2)/sheet.width,(tpZm.ch-pad*2)/sheet.height);
+  var viewW=Math.max(b.xMax-b.xMin,(warning.diameter||0)*6,20);
+  var viewH=Math.max(b.yMax-b.yMin,(warning.diameter||0)*6,20);
+  var focusSc=Math.min((tpZm.cw-80)/viewW,(tpZm.ch-80)/viewH);
+  tpZm.scale=Math.max(1,Math.min(80,focusSc/baseSc));
+  var sc=baseSc*tpZm.scale;
+  var cx=(b.xMin+b.xMax)/2,cy=(b.yMin+b.yMax)/2;
+  tpZm.ox=tpZm.cw/2-pad-cx*sc;
+  tpZm.oy=cy*sc+pad-tpZm.ch/2;
+  setDetailMode('toolpath');
+}
+
 function openToolpathModal(sheet){
   if(typeof tpZoomRenderTimer!=='undefined' && tpZoomRenderTimer){
     clearTimeout(tpZoomRenderTimer); tpZoomRenderTimer=null;
@@ -878,6 +909,7 @@ function tpSortAutoOrder(loopIdxs){
 
 function redrawToolpath(options){
   options=options||{};
+  if(!tpZm || !tpZm.sheet) return;
   const hideToolpath=options.hideToolpath===true;
   const cv=document.getElementById('tp-canvas');
   const ctx=cv.getContext('2d');
@@ -997,6 +1029,22 @@ function redrawToolpath(options){
   // Chế độ XEM ĐƯỜNG DAO: vẽ 4 góc chọn điểm xuống dao (nếu đang chọn chi tiết)
   if(detailMode==='toolpath' && !hideToolpath && typeof entryDrawCorners==='function'){
     entryDrawCorners(ctx, tx, ty, dpr);
+  }
+  // Draw the omitted source vector last so it remains visible over any paths.
+  if(detailMode==='toolpath' && tpZm.profileWarning && tpZm.profileWarning.loop){
+    var warningLoop=tpZm.profileWarning.loop;
+    ctx.save();
+    ctx.setLineDash([]);
+    ctx.lineCap='round';
+    [4,2].forEach(function(width,pass){
+      ctx.strokeStyle=pass===0?'#ffffff':'#e11d48';
+      ctx.lineWidth=width*dpr;
+      warningLoop.forEach(function(e){
+        ctx.beginPath();ctx.moveTo(tx(e.x1),ty(e.y1));
+        ctx.lineTo(tx(e.x2),ty(e.y2));ctx.stroke();
+      });
+    });
+    ctx.restore();
   }
 }
 

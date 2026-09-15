@@ -466,6 +466,16 @@ function n2gBuildPocketPathsForExport(){
   return out;
 }
 
+function n2gProfileSkipReasonJS(loop,halfD){
+  if(typeof ClipperLib==='undefined') return 'Thiếu thư viện Clipper trong giao diện.';
+  if(!(halfD>0)) return 'Đường kính dao không hợp lệ.';
+  var edges=loop.filter(function(e){return Math.hypot(e.x2-e.x1,e.y2-e.y1)>1e-7;});
+  if(edges.length<3) return 'Biên dạng còn dưới 3 cạnh hợp lệ.';
+  var area=polySignedAreaJS(edges.map(function(e){return{x:e.x1,y:e.y1};}));
+  if(Math.abs(area)<1e-9) return 'Diện tích có dấu gần bằng 0; cần kiểm tra biên dạng tự giao hoặc suy biến.';
+  return 'Offset không tạo được đường tâm dao hợp lệ; cần kiểm tra hình học tại vị trí này.';
+}
+
 function n2gBuildProfilePathsForExport(){
   var out={};
   _n2gProfileExportWarnings=[];
@@ -481,13 +491,19 @@ function n2gBuildProfilePathsForExport(){
         return eff===tool.layer && !v.is_drill_center && Math.hypot(v.x2-v.x1,v.y2-v.y1)>0.1;
       });
       if(!vecs.length) return;
-      var loops=buildLoopsJS(vecs);
+      var loops=buildProfileLoopsJS(vecs);
       var bbs=loops.map(function(loop){
         var xs=loop.flatMap(function(e){return[e.x1,e.x2];}),ys=loop.flatMap(function(e){return[e.y1,e.y2];});
         return{xMin:Math.min.apply(null,xs),xMax:Math.max.apply(null,xs),yMin:Math.min.apply(null,ys),yMax:Math.max.apply(null,ys)};
       });
       var islands=detectIslandJS(loops,bbs), records=[];
       loops.forEach(function(loop,li){
+        // Manifest hinh hoc nguon do chinh JS da ghep. Ruby phai dung manifest
+        // nay thay vi ghep lai cac vector va co the chon nham canh trong tolerance.
+        var sourceEdges=loop.map(function(e){
+          return {x1:e.x1,y1:e.y1,x2:e.x2,y2:e.y2,group_id:e.group_id,
+            part_id:e.part_id,layer:e.layer};
+        });
         // CuttingLines represents closed part contours. A lone open edge that
         // is shorter than the cutter is a stranded contour fragment, not a
         // machinable profile. Do not create a legacy record for it.
@@ -503,7 +519,8 @@ function n2gBuildProfilePathsForExport(){
         var tooSmallCircle=!!circ && strategy==='cut_in' && circ.r <= (+tool.diameter||0)/2 + 0.001;
         if(tooSmallCircle){
           records.push({id:profileLoopIdJS(loop),key:profileLoopKeyJS(loop),strategy:strategy,
-            mode:'skip',runs:[],reason:'tool_too_large'});
+            mode:'skip',runs:[],reason:'tool_too_large',closed:!!loop._closed,
+            island:!!islands[li],source_edges:sourceEdges});
           return;
         }
         var scopeOK=(typeof profileClipperAppliesJS==='function') ?
@@ -522,11 +539,51 @@ function n2gBuildProfilePathsForExport(){
             // contour that can invade the vector or exceed the tool radius.
             mode='skip';
             runs=[];
-            _n2gProfileExportWarnings.push({sheet:sheet.name,layer:tool.layer,diameter:+tool.diameter||0});
+            _n2gProfileExportWarnings.push({sheet:sheet.name,layer:tool.layer,
+              diameter:+tool.diameter||0,id:profileLoopIdJS(loop),bbox:bbs[li],loop:loop,
+              reason:n2gProfileSkipReasonJS(loop,(+tool.diameter||0)/2)});
+            if(typeof console!=='undefined' && console.warn){
+              var ends=[{x:loop[0].x1,y:loop[0].y1},
+                {x:loop[loop.length-1].x2,y:loop[loop.length-1].y2}];
+              var groupIds=Array.from(new Set(loop.map(function(e){return e.group_id;})));
+              var edgeOwner=function(e){
+                return loops.findIndex(function(candidateLoop){
+                  return candidateLoop.some(function(c){
+                    return (Math.hypot(c.x1-e.x1,c.y1-e.y1)<1e-7 &&
+                            Math.hypot(c.x2-e.x2,c.y2-e.y2)<1e-7) ||
+                           (Math.hypot(c.x1-e.x2,c.y1-e.y2)<1e-7 &&
+                            Math.hypot(c.x2-e.x1,c.y2-e.y1)<1e-7);
+                  });
+                });
+              };
+              var neighbors=ends.map(function(p){
+                return vecs.filter(function(e){
+                  return loop.indexOf(e)<0 && groupIds.indexOf(e.group_id)>=0;
+                }).map(function(e){
+                  var d1=Math.hypot(e.x1-p.x,e.y1-p.y);
+                  var d2=Math.hypot(e.x2-p.x,e.y2-p.y);
+                  return {distance_mm:Math.min(d1,d2),edge:[e.x1,e.y1,e.x2,e.y2],source:e};
+                }).sort(function(a,b){return a.distance_mm-b.distance_mm;}).slice(0,3)
+                  .map(function(item){
+                    item.owner_loop_index=edgeOwner(item.source);
+                    delete item.source;
+                    return item;
+                  });
+              });
+              console.warn('[N2G PROFILE WARNING DEBUG]',JSON.stringify({
+                sheet:sheet.name,layer:tool.layer,diameter:+tool.diameter||0,
+                id:profileLoopIdJS(loop),reason:n2gProfileSkipReasonJS(loop,(+tool.diameter||0)/2),
+                closed:!!loop._closed,edge_count:loop.length,group_ids:groupIds,
+                bbox:bbs[li],endpoint_gap_mm:Math.hypot(ends[1].x-ends[0].x,ends[1].y-ends[0].y),
+                endpoints:ends,source_edges:loop.length<=8?loop.map(function(e){return[e.x1,e.y1,e.x2,e.y2];}):[],
+                neighboring_edges:neighbors
+              }));
+            }
           }
         }
         records.push({id:profileLoopIdJS(loop),key:profileLoopKeyJS(loop),strategy:strategy,
-          mode:mode,runs:(mode==='clipper'||mode==='js_offset')?runs:[]});
+          mode:mode,runs:(mode==='clipper'||mode==='js_offset')?runs:[],
+          closed:!!loop._closed,island:!!islands[li],source_edges:sourceEdges});
       });
       if(records.length) out[sheet.name+'::'+tool.layer]=records;
     });
@@ -548,11 +605,17 @@ async function _doExportSend(){
       return '<div style="margin:4px 0">• Sheet <b>'+esc(w.sheet)+'</b>, layer <b>'+esc(w.layer)+
         '</b>, dao D'+w.diameter.toFixed(3)+' mm</div>';
     }).join('');
-    rows+=_n2gProfileExportWarnings.map(function(w){
-      return '<div style="margin:4px 0">• Sheet <b>'+esc(w.sheet)+'</b>, layer <b>'+esc(w.layer)+
-        '</b>, dao D'+w.diameter.toFixed(3)+' mm — bỏ qua Profile không an toàn</div>';
+    rows+=_n2gProfileExportWarnings.map(function(w,i){
+      var cx=(w.bbox.xMin+w.bbox.xMax)/2,cy=(w.bbox.yMin+w.bbox.yMax)/2;
+      return '<button type="button" data-n2g-profile-warning="'+i+'" '+
+        'style="display:block;width:100%;text-align:left;margin:4px 0;padding:7px;'+
+        'border:1px solid #e9a6a6;border-radius:5px;background:#fff7f7;cursor:pointer">'+
+        '• Sheet <b>'+esc(w.sheet)+'</b>, layer <b>'+esc(w.layer)+
+        '</b>, dao D'+w.diameter.toFixed(3)+' mm — <b>bấm để xem vị trí</b><br>'+
+        '<small>Gần X'+cx.toFixed(2)+' Y'+cy.toFixed(2)+' mm. '+esc(w.reason)+'</small></button>';
     }).join('');
-    var choice=await showGConfirm(
+    var reviewWarning=null;
+    var confirmPromise=showGConfirm(
       'Chi tiết không phù hợp với dao',
       'Một số vùng không tạo được đường chạy an toàn với đường kính dao hiện tại.'+
       '<div style="max-height:260px;overflow:auto;margin:10px 0">'+rows+'</div>'+
@@ -563,8 +626,21 @@ async function _doExportSend(){
       ],
       'warn'
     );
+    var warningButtons=document.querySelectorAll('#gconfirm-body [data-n2g-profile-warning]');
+    Array.prototype.forEach.call(warningButtons,function(button){
+      button.onclick=function(){
+        reviewWarning=_n2gProfileExportWarnings[Number(button.getAttribute('data-n2g-profile-warning'))];
+        _closeGConfirm('review');
+      };
+    });
+    var choice=await confirmPromise;
     if(choice!=='continue'){
       n2gExportDone(false);
+      if(choice==='review' && _n2gProfileExportWarnings.length &&
+         typeof tpFocusProfileWarning==='function'){
+        tpFocusProfileWarning(reviewWarning||_n2gProfileExportWarnings[0]);
+        setStatus('warn','Đang xem vị trí Profile bị bỏ qua; chưa xuất G-code.');
+      }
       return;
     }
     if(ov) ov.style.display='flex';

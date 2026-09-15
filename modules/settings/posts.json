@@ -30,21 +30,5 @@
     "footer": "G00 Z50.0\n{spindle_off}\nG0 X400.000 Y2400.000\nM30",
     "name": "TA VAN CHINH",
     "id": "post_1784084555309"
-  },
-  {
-    "unit": "G21",
-    "safe_z": 40,
-    "clear_z": 40,
-    "ext": ".nc",
-    "comment": "off",
-    "spindle_on": "M03",
-    "spindle_off": "M05",
-    "cool_on": "M16",
-    "cool_off": "",
-    "header": "{clamp}\nT{tool_number}\nG43 H{tool_number}\n{spindle_on} S{rpm}",
-    "toolchange": "{spindle_off}\nG4 X3.0\nT{tool_number}\nG43 H{tool_number}\n{spindle_on} S{rpm}",
-    "footer": "{spindle_off}\nG0 Z{safe_z}\nG0 X80.000 Y2400.000\nM30",
-    "name": "HuuPhatCNC_LNC_M16.nc",
-    "id": "post_imp_1788839840_2"
   }
 ]

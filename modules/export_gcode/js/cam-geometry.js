@@ -462,6 +462,10 @@ function profileClipperAppliesJS(isIsland,strategy){
 // at exactly halfD and consecutive offset lines meet at one miter point. This
 // deliberately keeps right-angle vectors square and avoids verbose arc points.
 function profileExactCutOutOffsetJS(loop,halfD){
+  if(!profileExactCutOutOffsetJS._trimDebugLoaded && typeof console!=='undefined'){
+    console.info('[N2G PROFILE TRIM LOADED] diagnostic-v2');
+    profileExactCutOutOffsetJS._trimDebugLoaded=true;
+  }
   if(!loop||loop.length<3||!(halfD>0)) return [];
   var edges=loop.filter(function(e){return Math.hypot(e.x2-e.x1,e.y2-e.y1)>1e-7;});
   if(edges.length<3) return [];
@@ -482,8 +486,10 @@ function profileExactCutOutOffsetJS(loop,halfD){
     var t=(qx*bd.y-qy*bd.x)/den;
     return{x:a.x+t*ad.x,y:a.y+t*ad.y};
   }
-  var out=[],n=edges.length;
+  var out=[],n=edges.length,concaveCount=0,concaveArcCount=0,maxConcaveExtension=0;
+  var concaveDiagnostics=[];
   for(var i=0;i<n;i++){
+    var vertexOutputStart=out.length;
     var prev=(i-1+n)%n,ep=edges[prev],ec=edges[i];
     var np=shifted[prev],nc=shifted[i];
     // Average the two nominally identical endpoints so sub-mm source gaps do
@@ -504,7 +510,30 @@ function profileExactCutOutOffsetJS(loop,halfD){
     var convex=cross*side>1e-10;
     var d1=Math.hypot(hit.x-p1.x,hit.y-p1.y);
     var d2=Math.hypot(hit.x-p2.x,hit.y-p2.y);
-    if(convex && (d1>halfD+1e-7 || d2>halfD+1e-7)){
+    if(!convex){
+      concaveCount++;
+      maxConcaveExtension=Math.max(maxConcaveExtension,d1,d2);
+      concaveDiagnostics.push({edge_index:i,output_index:out.length,vertex:v,
+        nominal_intersection:hit,extension_mm:Math.max(d1,d2),
+        source_gap_mm:Math.hypot(ep.x2-ec.x1,ep.y2-ec.y1)});
+    }
+    if(!convex && (d1>halfD+1e-7 || d2>halfD+1e-7)){
+      concaveArcCount++;
+      // Goc lom gan quay dau: giao hai duong offset co the tao mui kim rat
+      // dai. Noi hai diem tiep tuyen bang CUNG NGAN R=ban kinh dao ngay trong
+      // khe; khong di toi giao diem xa va khong vong cung dai xuong phia duoi.
+      var la1=Math.atan2(p1.y-v.y,p1.x-v.x);
+      var la2=Math.atan2(p2.y-v.y,p2.x-v.x);
+      var lda=la2-la1;
+      while(lda<=-Math.PI) lda+=2*Math.PI;
+      while(lda>Math.PI) lda-=2*Math.PI;
+      var lsteps=Math.max(Math.ceil(Math.abs(lda)/(Math.PI/24)),1);
+      for(var lk=0;lk<=lsteps;lk++){
+        var lang=la1+lda*lk/lsteps;
+        out.push({x:v.x+Math.cos(lang)*halfD,y:v.y+Math.sin(lang)*halfD,
+          _n2gConcaveArc:true});
+      }
+    }else if(convex && (d1>halfD+1e-7 || d2>halfD+1e-7)){
       var a1=Math.atan2(p1.y-v.y,p1.x-v.x);
       var a2=Math.atan2(p2.y-v.y,p2.x-v.x);
       var da=a2-a1;
@@ -518,7 +547,123 @@ function profileExactCutOutOffsetJS(loop,halfD){
     }else{
       out.push(hit);
     }
+    if(!convex){
+      for(var mark=vertexOutputStart;mark<out.length;mark++)
+        out[mark]._n2gConcaveCorner=i;
+    }
   }
+  // Neu hai nhanh dan vao/ra cat nhau truoc cung lom, phan tu giao diem xuong
+  // cung la mot vong thua. Cat vong tai giao diem va chuyen thang sang nhanh ra.
+  // Chi sua self-intersection co chua cung do chinh nhanh tren tao ra.
+  function segmentHit(a,b,c,d){
+    var rx=b.x-a.x,ry=b.y-a.y,sx=d.x-c.x,sy=d.y-c.y;
+    var den=rx*sy-ry*sx;
+    if(Math.abs(den)<1e-10) return null;
+    var qx=c.x-a.x,qy=c.y-a.y;
+    var t=(qx*sy-qy*sx)/den,u=(qx*ry-qy*rx)/den;
+    if(t<=1e-7||t>=1-1e-7||u<=1e-7||u>=1-1e-7) return null;
+    return{x:a.x+t*rx,y:a.y+t*ry};
+  }
+  if(typeof console!=='undefined'&&console.info){
+    var debugKey=[edges[0].group_id,n,edges[0].x1,edges[0].y1,halfD].join('|');
+    var debugSeen=profileExactCutOutOffsetJS._trimDebugSeen ||
+      (profileExactCutOutOffsetJS._trimDebugSeen=Object.create(null));
+    if(!debugSeen[debugKey]){
+      debugSeen[debugKey]=true;
+      console.info('[N2G PROFILE TRIM ROUTE]',JSON.stringify({
+        group_id:edges[0].group_id,edge_count:n,tool_radius_mm:halfD,
+        concave_count:concaveCount,generated_concave_arcs:concaveArcCount,
+        max_concave_extension_mm:maxConcaveExtension
+      }));
+      concaveDiagnostics.forEach(function(corner){
+        var source=[],points=[],intersections=[];
+        for(var cs=-5;cs<=5;cs++){
+          var ci=(corner.edge_index+cs+n)%n;
+          source.push({index:ci,edge:edges[ci]});
+        }
+        for(var cp=-6;cp<=6;cp++){
+          var oi=(corner.output_index+cp+out.length)%out.length;
+          points.push({index:oi,x:out[oi].x,y:out[oi].y});
+        }
+        for(var ca=0;ca<points.length-1;ca++){
+          for(var cb=ca+2;cb<points.length-1;cb++){
+            var a=points[ca],b=points[ca+1],c=points[cb],d=points[cb+1];
+            var rx=b.x-a.x,ry=b.y-a.y,sx=d.x-c.x,sy=d.y-c.y;
+            var den=rx*sy-ry*sx;
+            if(Math.abs(den)<1e-10) continue;
+            var qx=c.x-a.x,qy=c.y-a.y;
+            var t=(qx*sy-qy*sx)/den,u=(qx*ry-qy*rx)/den;
+            if(t< -1e-7||t>1+1e-7||u< -1e-7||u>1+1e-7) continue;
+            intersections.push({segment_a:[a.index,b.index],segment_b:[c.index,d.index],
+              t:t,u:u,point:{x:a.x+t*rx,y:a.y+t*ry},
+              strict_interior:t>1e-7&&t<1-1e-7&&u>1e-7&&u<1-1e-7});
+          }
+        }
+        console.info('[N2G PROFILE CONCAVE LOCAL DEBUG]',JSON.stringify({
+          group_id:edges[0].group_id,tool_radius_mm:halfD,corner:corner,
+          source_edges:source,offset_points:points,intersections:intersections
+        }));
+      });
+    }
+    var arcStart=0;
+    while(arcStart<out.length){
+      if(!out[arcStart]._n2gConcaveArc){arcStart++;continue;}
+      var arcEnd=arcStart;
+      while(arcEnd+1<out.length&&out[arcEnd+1]._n2gConcaveArc) arcEnd++;
+      var localFrom=Math.max(0,arcStart-6),localTo=Math.min(out.length-1,arcEnd+6);
+      var localHits=[];
+      for(var di=localFrom;di<arcStart;di++){
+        for(var dj=arcEnd;dj<localTo;dj++){
+          if(dj<=di+1) continue;
+          var dh=segmentHit(out[di],out[di+1],out[dj],out[dj+1]);
+          if(dh) localHits.push({incoming_segment:di,outgoing_segment:dj,point:dh});
+        }
+      }
+      console.info('[N2G PROFILE CONCAVE TRIM DEBUG]',JSON.stringify({
+        group_id:edges[0].group_id,tool_radius_mm:halfD,
+        arc_start:arcStart,arc_end:arcEnd,
+        local_points:out.slice(localFrom,localTo+1).map(function(p,idx){
+          return{index:localFrom+idx,x:p.x,y:p.y,is_arc:!!p._n2gConcaveArc};
+        }),intersections:localHits
+      }));
+      arcStart=arcEnd+1;
+    }
+  }
+  concaveDiagnostics.forEach(function(corner){
+    var start=out.findIndex(function(p){return p._n2gConcaveCorner===corner.edge_index;});
+    if(start<0) return;
+    var span=0;
+    while(start+span<out.length&&out[start+span]._n2gConcaveCorner===corner.edge_index) span++;
+    var windowSize=Math.min(6,Math.floor((out.length-span-1)/2));
+    if(windowSize<1) return;
+    // Rotate a closed run temporarily so a corner at the end/start receives
+    // the same local treatment as every other corner.
+    var rotation=(start-windowSize+out.length)%out.length;
+    var work=out.slice(rotation).concat(out.slice(0,rotation));
+    var localStart=windowSize,localEnd=localStart+span-1,best=null;
+    for(var si=0;si<localStart;si++){
+      for(var sj=localEnd+windowSize-1;sj>=localEnd;sj--){
+        if(sj<=si+1) continue;
+        var crossing=segmentHit(work[si],work[si+1],work[sj],work[sj+1]);
+        if(crossing){best={si:si,sj:sj,point:crossing};break;}
+      }
+      // First crossing encountered along the incoming path; prefer the last
+      // outgoing crossing at that segment to remove both reversed spurs.
+      if(best) break;
+    }
+    if(!best) return;
+    if(typeof console!=='undefined'&&console.info){
+      console.info('[N2G PROFILE CONCAVE TRIM SELECTED]',JSON.stringify({
+        group_id:edges[0].group_id,source_corner:corner.edge_index,
+        intersection:best.point,removed_points:best.sj-best.si,
+        incoming:[work[best.si],work[best.si+1]],
+        outgoing:[work[best.sj],work[best.sj+1]],local_window:windowSize
+      }));
+    }
+    work.splice.apply(work,[best.si+1,best.sj-best.si].concat([best.point]));
+    out=work;
+  });
+  out.forEach(function(p){delete p._n2gConcaveArc;delete p._n2gConcaveCorner;});
   return out;
 }
 
@@ -1981,6 +2126,149 @@ function buildLoopsJS(vecs){
     loop._closed = loop.length >= 2 &&
       Math.hypot(last2.x2-first.x1, last2.y2-first.y1) < 1.0;
     loops.push(loop);
+  }
+  return loops;
+}
+
+// Profile only: mirror GcodeEngine.build_loops so preview/export use the same
+// source contours as Ruby. Keep buildLoopsJS unchanged for other consumers.
+function buildProfileLoopsJS(vecs){
+  if(!vecs||!vecs.length) return [];
+  function rounded(v,digits){
+    var scale=Math.pow(10,digits);
+    return Math.sign(v)*Math.round(Math.abs(v)*scale)/scale;
+  }
+  function edgeKey(e,reverse){
+    var a=reverse?[e.x2,e.y2,e.x1,e.y1]:[e.x1,e.y1,e.x2,e.y2];
+    return a.map(function(v){return rounded(v,2);}).join(',');
+  }
+  function distance(x1,y1,x2,y2){return Math.hypot(x1-x2,y1-y2);}
+  function hasExactContinuation(x,y,groupId){
+    var count=0;
+    for(var i=0;i<remaining.length;i++){
+      var e=remaining[i];
+      if(e.group_id!==groupId) continue;
+      if(distance(e.x1,e.y1,x,y)<0.001||distance(e.x2,e.y2,x,y)<0.001){
+        if(++count>1) return false;
+      }
+    }
+    return count===1;
+  }
+  function shouldClose(x1,y1,x2,y2,contX,contY,groupId){
+    var gap=distance(x1,y1,x2,y2);
+    return gap<0.5 && !(gap>0.001 && hasExactContinuation(contX,contY,groupId));
+  }
+  function findConnected(x,y,groupId,tolerance){
+    for(var i=0;i<remaining.length;i++){
+      var e=remaining[i];
+      if(e.group_id!==groupId) continue;
+      if(distance(e.x1,e.y1,x,y)<tolerance||distance(e.x2,e.y2,x,y)<tolerance)
+        return i;
+    }
+    return -1;
+  }
+  function reversed(e){
+    return Object.assign({},e,{x1:e.x2,y1:e.y2,x2:e.x1,y2:e.y1});
+  }
+  function loopKey(loop){
+    var xs=[],ys=[];
+    loop.forEach(function(e){xs.push(e.x1,e.x2);ys.push(e.y1,e.y2);});
+    return [loop.length,rounded(Math.min.apply(null,xs),1),
+      rounded(Math.min.apply(null,ys),1),rounded(Math.max.apply(null,xs),1),
+      rounded(Math.max.apply(null,ys),1)].join(',');
+  }
+
+  var seenEdges=Object.create(null),remaining=[],loops=[],seenLoops=Object.create(null);
+  vecs.forEach(function(e){
+    var k1=edgeKey(e,false),k2=edgeKey(e,true);
+    if(seenEdges[k1]||seenEdges[k2]) return;
+    seenEdges[k1]=true;
+    remaining.push(e);
+  });
+  while(remaining.length){
+    var loop=[remaining.shift()],closed=false,maxIter=remaining.length+1,iter=0;
+    while(!closed&&remaining.length&&iter<maxIter){
+      iter++;
+      var tail=loop[loop.length-1],head=loop[0],ni=-1;
+      ni=findConnected(tail.x2,tail.y2,tail.group_id,0.001);
+      var exactHead=findConnected(head.x1,head.y1,head.group_id,0.001);
+      if(ni<0 && exactHead<0)
+        ni=findConnected(tail.x2,tail.y2,tail.group_id,0.5);
+      if(ni>=0){
+        var e=remaining.splice(ni,1)[0];
+        var d1=distance(e.x1,e.y1,tail.x2,tail.y2);
+        var d2=distance(e.x2,e.y2,tail.x2,tail.y2);
+        if(d2<d1) e=reversed(e);
+        loop.push(e);
+        closed=shouldClose(e.x2,e.y2,head.x1,head.y1,e.x2,e.y2,e.group_id);
+      }else{
+        var hi=exactHead>=0?exactHead:findConnected(head.x1,head.y1,head.group_id,0.5);
+        if(hi<0) break;
+        var e2=remaining.splice(hi,1)[0];
+        var h1=distance(e2.x2,e2.y2,head.x1,head.y1);
+        var h2=distance(e2.x1,e2.y1,head.x1,head.y1);
+        if(h2<h1) e2=reversed(e2);
+        loop.unshift(e2);
+        closed=shouldClose(loop[loop.length-1].x2,loop[loop.length-1].y2,
+                           e2.x1,e2.y1,e2.x1,e2.y1,e2.group_id);
+      }
+    }
+    var key=loopKey(loop);
+    if(!seenLoops[key]){
+      seenLoops[key]=true;
+      loop._closed=closed;
+      loops.push(loop);
+    }
+  }
+
+  // Mot cung rat ngan co the bi khep som thanh loop 1-2 canh, trong khi hai
+  // canh ke cua no da nam trong mot loop lon cung group. Gan lai chi khi vi tri
+  // chen la don nghia: mot dau khop chinh xac va dau con lai cach canh lien ke
+  // duoi tolerance. Khong noi theo bbox hay chi theo khoang cach gan nhat.
+  var repaired=true;
+  while(repaired){
+    repaired=false;
+    for(var fi=0;fi<loops.length;fi++){
+      var frag=loops[fi];
+      if(!frag._closed||frag.length>2||!frag.length) continue;
+      var fx=[],fy=[];
+      frag.forEach(function(e){fx.push(e.x1,e.x2);fy.push(e.y1,e.y2);});
+      if(Math.hypot(Math.max.apply(null,fx)-Math.min.apply(null,fx),
+                    Math.max.apply(null,fy)-Math.min.apply(null,fy))>=0.5) continue;
+      var gid=frag[0].group_id,candidates=[];
+      function addCandidate(target,index,before,oriented,gap){
+        if(gap<0.5) candidates.push({target:target,index:index,before:before,
+          edges:oriented,gap:gap});
+      }
+      for(var ti=0;ti<loops.length;ti++){
+        var target=loops[ti];
+        if(ti===fi||target.length<=frag.length||!target.length||target[0].group_id!==gid) continue;
+        for(var ei=0;ei<target.length;ei++){
+          var edge=target[ei],next=target[(ei+1)%target.length],prev=target[(ei-1+target.length)%target.length];
+          var fs={x:frag[0].x1,y:frag[0].y1};
+          var fe={x:frag[frag.length-1].x2,y:frag[frag.length-1].y2};
+          var rev=frag.slice().reverse().map(reversed);
+          if(distance(edge.x2,edge.y2,fs.x,fs.y)<0.001)
+            addCandidate(target,ei+1,false,frag,distance(fe.x,fe.y,next.x1,next.y1));
+          if(distance(edge.x2,edge.y2,fe.x,fe.y)<0.001)
+            addCandidate(target,ei+1,false,rev,distance(fs.x,fs.y,next.x1,next.y1));
+          if(distance(edge.x1,edge.y1,fe.x,fe.y)<0.001)
+            addCandidate(target,ei,true,frag,distance(prev.x2,prev.y2,fs.x,fs.y));
+          if(distance(edge.x1,edge.y1,fs.x,fs.y)<0.001)
+            addCandidate(target,ei,true,rev,distance(prev.x2,prev.y2,fe.x,fe.y));
+        }
+      }
+      candidates.sort(function(a,b){return a.gap-b.gap;});
+      // Neu hai cach chen tot ngang nhau, giu canh bao thay vi tu chon va tao
+      // duong cat xien sang nhanh khac.
+      if(!candidates.length || (candidates.length>1 &&
+         Math.abs(candidates[1].gap-candidates[0].gap)<0.001)) continue;
+      var best=candidates[0];
+      best.target.splice.apply(best.target,[best.index,0].concat(best.edges));
+      loops.splice(fi,1);
+      repaired=true;
+      break;
+    }
   }
   return loops;
 }

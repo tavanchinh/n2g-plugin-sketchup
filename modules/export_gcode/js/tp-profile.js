@@ -63,7 +63,7 @@ function isCuttingLayerJS(name){
 }
 
 function drawToolpathProfile(ctx,vecs,tool,tx,ty,sc,dpr){
-  const loops=buildLoopsJS(vecs.filter(v=>!v.is_drill_center))
+  const loops=buildProfileLoopsJS(vecs.filter(v=>!v.is_drill_center))
     .filter(function(lp){
       var xs=lp.flatMap(function(e){return[e.x1,e.x2];}),ys=lp.flatMap(function(e){return[e.y1,e.y2];});
       return (Math.max.apply(null,xs)-Math.min.apply(null,xs))>1.0 ||

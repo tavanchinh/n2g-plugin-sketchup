@@ -50,7 +50,7 @@ module N2G
         inside * 2 > samples.size
       end
 
-      def self.build_loops(raw_edges)
+      def self.build_loops(raw_edges, prefer_exact_continuation=false)
         # Dedupe edges trùng nhau trước (do component lồng nhau extract nhiều lần)
         seen_edges = {}
         unique_edges = raw_edges.select do |e|
@@ -64,6 +64,20 @@ module N2G
 
         loops     = []
         remaining = unique_edges.dup
+        exact_continuation = lambda do |x, y, group_id|
+          remaining.count do |candidate|
+            candidate[:group_id] == group_id &&
+              (Math.hypot(candidate[:x1]-x, candidate[:y1]-y) < 0.001 ||
+               Math.hypot(candidate[:x2]-x, candidate[:y2]-y) < 0.001)
+          end == 1
+        end
+        find_connected = lambda do |x, y, group_id, tolerance|
+          remaining.index do |candidate|
+            candidate[:group_id] == group_id &&
+              (Math.hypot(candidate[:x1]-x, candidate[:y1]-y) < tolerance ||
+               Math.hypot(candidate[:x2]-x, candidate[:y2]-y) < tolerance)
+          end
+        end
 
         while remaining.any?
           loop_edges = [remaining.shift]
@@ -78,9 +92,15 @@ module N2G
             head_x  = loop_edges.first[:x1]
             head_y  = loop_edges.first[:y1]
 
-            ni = remaining.index do |e|
-              (Math.sqrt((e[:x1] - tail_x)**2 + (e[:y1] - tail_y)**2) < 0.5) ||
-              (Math.sqrt((e[:x2] - tail_x)**2 + (e[:y2] - tail_y)**2) < 0.5)
+            if prefer_exact_continuation
+              ni = find_connected.call(tail_x, tail_y, loop_edges.last[:group_id], 0.001)
+              exact_head = find_connected.call(head_x, head_y, loop_edges.first[:group_id], 0.001)
+              ni ||= find_connected.call(tail_x, tail_y, loop_edges.last[:group_id], 0.5) unless exact_head
+            else
+              ni = remaining.index do |e|
+                (Math.sqrt((e[:x1] - tail_x)**2 + (e[:y1] - tail_y)**2) < 0.5) ||
+                (Math.sqrt((e[:x2] - tail_x)**2 + (e[:y2] - tail_y)**2) < 0.5)
+              end
             end
 
             if ni
@@ -92,14 +112,20 @@ module N2G
                 e = e.merge(x1: e[:x2], y1: e[:y2], x2: e[:x1], y2: e[:y1])
               end
               loop_edges << e
-              closed = Math.sqrt((e[:x2] - head_x)**2 + (e[:y2] - head_y)**2) < 0.5
+              gap = Math.hypot(e[:x2] - head_x, e[:y2] - head_y)
+              closed = gap < 0.5 && !(prefer_exact_continuation && gap > 0.001 &&
+                exact_continuation.call(e[:x2], e[:y2], e[:group_id]))
             else
               # Hết edge nối ĐUÔI → thử nối vào ĐẦU (prepend). Cần cho ĐƯỜNG HỞ khi edge
               # khởi đầu nằm GIỮA đường (vd zigzag liền mạch): chỉ nối 1 chiều thì phần
               # phía trước bị bỏ lại thành loop riêng → dao nhấc lên chạy rời rạc.
-              hi = remaining.index do |e2|
-                (Math.sqrt((e2[:x2] - head_x)**2 + (e2[:y2] - head_y)**2) < 0.5) ||
-                (Math.sqrt((e2[:x1] - head_x)**2 + (e2[:y1] - head_y)**2) < 0.5)
+              if prefer_exact_continuation
+                hi = exact_head || find_connected.call(head_x, head_y, loop_edges.first[:group_id], 0.5)
+              else
+                hi = remaining.index do |e2|
+                  (Math.sqrt((e2[:x2] - head_x)**2 + (e2[:y2] - head_y)**2) < 0.5) ||
+                  (Math.sqrt((e2[:x1] - head_x)**2 + (e2[:y1] - head_y)**2) < 0.5)
+                end
               end
               break unless hi
               e2 = remaining.delete_at(hi)
@@ -109,8 +135,10 @@ module N2G
                 e2 = e2.merge(x1: e2[:x2], y1: e2[:y2], x2: e2[:x1], y2: e2[:y1])
               end
               loop_edges.unshift(e2)
-              closed = Math.sqrt((loop_edges.last[:x2] - e2[:x1])**2 +
-                                 (loop_edges.last[:y2] - e2[:y1])**2) < 0.5
+              gap = Math.hypot(loop_edges.last[:x2] - e2[:x1],
+                               loop_edges.last[:y2] - e2[:y1])
+              closed = gap < 0.5 && !(prefer_exact_continuation && gap > 0.001 &&
+                exact_continuation.call(e2[:x1], e2[:y1], e2[:group_id]))
             end
           end
 
@@ -214,12 +242,21 @@ module N2G
                   arc_end = j
                 end
 
-                vx1   = edges[i][:x1] - cx;         vy1 = edges[i][:y1] - cy
-                vx2   = edges[arc_end][:x2] - cx;   vy2 = edges[arc_end][:y2] - cy
-                cross = vx1 * vy2 - vy1 * vx2
-                cw    = cross < 0
-
                 arc_edges = edges[i..arc_end]
+                # Xac dinh G02/G03 tu toan bo chuoi diem. Chi dung vector dau-cuoi
+                # se mo ho voi cung gan 180 do (cross gan 0) va co the dao phia cung.
+                turn_sum = arc_edges.sum do |ae|
+                  ax = ae[:x1] - cx; ay = ae[:y1] - cy
+                  bx = ae[:x2] - cx; by = ae[:y2] - cy
+                  ax * by - ay * bx
+                end
+                if turn_sum.abs < 1e-10
+                  vx1 = edges[i][:x1] - cx;       vy1 = edges[i][:y1] - cy
+                  vx2 = edges[arc_end][:x2] - cx; vy2 = edges[arc_end][:y2] - cy
+                  turn_sum = vx1 * vy2 - vy1 * vx2
+                end
+                cw = turn_sum < 0
+
                 arc_closed = (arc_edges.last[:x2] - arc_edges.first[:x1]).abs < 1.0 &&
                              (arc_edges.last[:y2] - arc_edges.first[:y1]).abs < 1.0
                 min_segments = arc_closed ? FULL_CIRCLE_MIN_SEGMENTS : ARC_MIN_SEGMENTS
@@ -803,7 +840,11 @@ module N2G
         counter = 0; last_base = nil
         all_sheets.map do |sheet|
           base = parse_sheet_name(sheet[:name])[:side].gsub(/-?bottom$/i, '').strip
-          counter += 1 if base != last_base
+          if base != last_base
+            nesting_number = base.match(/\Asheet-(\d+)\z/i)
+            number = nesting_number && nesting_number[1].to_i
+            counter = number && number > 0 ? number : counter + 1
+          end
           last_base = base
           counter
         end
@@ -2745,13 +2786,22 @@ module N2G
         # Dao đang ở trên cao (clear_z) tại off_pts[0]. Hạ nhanh tới MẶT VÁN (z_top),
         # rồi G1 chéo xuống z_bottom dọc L mm đầu.
         out = ["G0 Z#{format('%.3f', z_top)}"]
+        feed_written = false
+        feed_word = lambda do
+          if feed_written
+            ''
+          else
+            feed_written = true
+            " F#{feed}"
+          end
+        end
         ramp_end = walk.index { |w| (w[:cum] - l_eff).abs < 1e-6 } || 0
 
         # Đoạn đang hạ Z giữ nguyên G1 tuyến tính; không phát cung 3D để bảo đảm
         # tương thích controller. Từ mốc đạt đáy trở đi mới nội suy G02/G03.
         walk[1..ramp_end].to_a.each do |w|
           z = z_top + (z_bottom - z_top) * (w[:cum] / l_eff)
-          out << "G1 X#{format('%.3f', w[:x])} Y#{format('%.3f', w[:y])} Z#{format('%.3f', z)} F#{feed}"
+          out << "G1 X#{format('%.3f', w[:x])} Y#{format('%.3f', w[:y])} Z#{format('%.3f', z)}#{feed_word.call}"
         end
 
         bottom = walk[ramp_end..] || []
@@ -2767,11 +2817,11 @@ module N2G
             dir = arc_dir_gcode(bottom, arc)
             center = equalize_arc_center(start, finish, arc[:cx], arc[:cy])
             out << "#{dir} X#{format('%.3f',finish[:x])} Y#{format('%.3f',finish[:y])} " \
-                   "I#{format('%.3f',center[:x]-start[:x])} J#{format('%.3f',center[:y]-start[:y])} F#{feed}"
+                   "I#{format('%.3f',center[:x]-start[:x])} J#{format('%.3f',center[:y]-start[:y])}#{feed_word.call}"
             bi = arc[:e] + 1
           else
             w = bottom[bi]
-            out << "G1 X#{format('%.3f', w[:x])} Y#{format('%.3f', w[:y])} F#{feed}"
+            out << "G1 X#{format('%.3f', w[:x])} Y#{format('%.3f', w[:y])}#{feed_word.call}"
             bi += 1
           end
         end
@@ -2802,23 +2852,32 @@ module N2G
           walk << { x:b[:x], y:b[:y], cum:cum }
         end
         out = ["G0 Z#{format('%.3f', z_top)}"]
+        feed_written = false
+        feed_word = lambda do
+          if feed_written
+            ''
+          else
+            feed_written = true
+            " F#{feed}"
+          end
+        end
         ramp_end = walk.index { |w| w[:cum] >= l_eff - 1e-6 } || (walk.size - 1)
 
         # 1) Ha doc tu diem dau toi moc L.
         walk[1..ramp_end].to_a.each do |w|
           z = z_top + (z_bottom-z_top)*([w[:cum],l_eff].min/l_eff)
           out << "G1 X#{format('%.3f',w[:x])} Y#{format('%.3f',w[:y])} " \
-                 "Z#{format('%.3f',z)} F#{feed}"
+                 "Z#{format('%.3f',z)}#{feed_word.call}"
         end
 
         # 2) Da dat Z day: lui dung theo vet ramp ve diem dau.
         walk[0...ramp_end].reverse_each do |w|
-          out << "G1 X#{format('%.3f',w[:x])} Y#{format('%.3f',w[:y])} F#{feed}"
+          out << "G1 X#{format('%.3f',w[:x])} Y#{format('%.3f',w[:y])}#{feed_word.call}"
         end
 
         # 3) Cat lai toan bo path ho tai Z day de khong sot doan dau.
         pts[1..].to_a.each do |p|
-          out << "G1 X#{format('%.3f',p[:x])} Y#{format('%.3f',p[:y])} F#{feed}"
+          out << "G1 X#{format('%.3f',p[:x])} Y#{format('%.3f',p[:y])}#{feed_word.call}"
         end
         out
       end
@@ -2866,7 +2925,36 @@ module N2G
         raw = lines.reject { |l| l[:is_drill_center] }
                    .select { |l| Math.sqrt((l[:x2]-l[:x1])**2 + (l[:y2]-l[:y1])**2) > 0.1 }
 
-        raw_loops = build_loops(raw)
+        # Khi JS gui manifest Profile, day la danh sach loop nguon chinh thuc da
+        # dung de ve preview va tao Clipper runs. Khong ghep lai vector trong Ruby:
+        # hai engine co the chon hai canh khac nhau khi nhieu dau mut cach < 0.5mm.
+        raw_loops = nil
+        if app_settings[:profile_engine].to_s == 'clipper'
+          manifest_layer = (app_settings[:layer_name] || cfg[:layer]).to_s
+          manifest_key = "#{app_settings[:sheet_name]}::#{manifest_layer}"
+          all_manifest = app_settings[:profile_paths] || {}
+          manifest_records = all_manifest[manifest_key] || all_manifest[manifest_key.to_s]
+          if manifest_records.is_a?(Array) && manifest_records.any? &&
+             manifest_records.all? { |rec| (rec['source_edges'] || rec[:source_edges]).is_a?(Array) }
+            raw_loops = manifest_records.map do |rec|
+              source = rec['source_edges'] || rec[:source_edges]
+              edges = source.map do |edge|
+                {
+                  x1:(edge['x1'] || edge[:x1]).to_f,
+                  y1:(edge['y1'] || edge[:y1]).to_f,
+                  x2:(edge['x2'] || edge[:x2]).to_f,
+                  y2:(edge['y2'] || edge[:y2]).to_f,
+                  group_id:edge['group_id'] || edge[:group_id],
+                  part_id:edge['part_id'] || edge[:part_id],
+                  layer:edge['layer'] || edge[:layer]
+                }
+              end
+              { edges:edges, closed:(rec['closed'] == true || rec[:closed] == true),
+                _n2g_manifest:true }
+            end.reject { |lp| lp[:edges].empty? }
+          end
+        end
+        raw_loops ||= build_loops(raw, true)
 
         # Detect islands: containedBy % 2 == 1 → island thực
         # containedBy=0 → outer, =1 → island, =2 → tấm con trong island (cut_out)
@@ -3113,7 +3201,11 @@ module N2G
                               (bw_lp-bh_lp).abs <= [bw_lp,bh_lp].max*0.02
           _source_low_seg_circle = _source_is_circle && source_edges.size < FULL_CIRCLE_MIN_SEGMENTS
 
-          segments = if _source_low_seg_circle
+          segments = if loop[:_n2g_preoffset]
+                       # Canvas ve Clipper run bang dung tung doan thang JS.
+                       # Khong fit lai thanh cung trong Ruby vi co the doi hinh hoc.
+                       edges.map { |e| { type: :line, edges:[e] } }
+                     elsif _source_low_seg_circle
                        edges.map { |e| { type: :line, edges:[e] } }
                      else
                        classify_segments(edges)
@@ -3428,7 +3520,9 @@ module N2G
             # tránh đỉnh miter vọt xa. Cắt TRONG (cut_in/island) giữ miter — bo cung sẽ
             # đưa dao tới quá gần đỉnh nhọn và cắt lẹm ra ngoài biên dạng.
             off_pts = if loop[:_n2g_preoffset]
-              clean_edges.map { |e| { x:e[:x1], y:e[:y1] } }
+              # Giu nguyen 100% day diem JS. Khong dedupe/loai canh ngan lan nua:
+              # cac diem nho nay co the la mot phan that cua bien dang preview.
+              edges.map { |e| { x:e[:x1], y:e[:y1] } }
             else
               offset_polygon_miter(clean_edges, -offset, effective_cfg[:strategy] == :cut_out)
             end

@@ -44,7 +44,7 @@ module N2G
           modules/export_gcode/css
           website
         ].freeze
-        EXCLUDE_DIRS = %w[node_modules .git].freeze   # loại ở mọi nơi
+        EXCLUDE_DIRS = %w[node_modules .git audit].freeze   # loại ở mọi nơi
 
         # Loại theo MẪU TÊN — file rác/backup của quá trình phát triển.
         # CỰC KỲ QUAN TRỌNG: các file .bak chứa MÃ NGUỒN THUẦN (main.rb.bak_gcode_v9...).
