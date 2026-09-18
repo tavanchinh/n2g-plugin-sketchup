@@ -36,7 +36,7 @@
       "actual_thickness": 17
     }
   },
-  "active_tool_preset": "1789458369000",
+  "active_tool_preset": "1787213743743",
   "thresh_bot": 413,
   "thresh_top": 351,
   "cut_dir": "ccw",
@@ -53,5 +53,5 @@
   "arc_min_r": 60,
   "long_final_edge": true,
   "sharp_outside_corner": true,
-  "auto_update": true
+  "auto_update": false
 }

@@ -135,9 +135,15 @@ function drawToolpathProfile(ctx,vecs,tool,tx,ty,sc,dpr){
           profileClipperExtra=profileClipperRuns.slice(1);
         }else if(strategy==='cut_in'){
           // Clipper co vao rong = dao khong lot. Khong fallback miter.
+          if(typeof profileSkipDebugJS==='function') profileSkipDebugJS(
+            'preview','preview_cut_in_skipped',loop,tool.diameter/2,strategy,
+            {sheet:(typeof tpZm!=='undefined'&&tpZm.sheet)?tpZm.sheet.name:null,tool:tool});
           return;
         }else{
           // Never approximate a closed cut_out when exact offset failed.
+          if(typeof profileSkipDebugJS==='function') profileSkipDebugJS(
+            'preview','preview_cut_out_skipped',loop,tool.diameter/2,strategy,
+            {sheet:(typeof tpZm!=='undefined'&&tpZm.sheet)?tpZm.sheet.name:null,tool:tool});
           return;
         }
       } else if(loop._closed){

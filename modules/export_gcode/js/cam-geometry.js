@@ -461,17 +461,56 @@ function profileClipperAppliesJS(isIsland,strategy){
 // when neighbouring radius envelopes overlap. Every source edge stays parallel
 // at exactly halfD and consecutive offset lines meet at one miter point. This
 // deliberately keeps right-angle vectors square and avoids verbose arc points.
+function profileSkipDebugJS(stage,reason,loop,halfD,strategy,extra){
+  if(typeof console==='undefined'||!console.warn) return;
+  var src=Array.isArray(loop)?loop:[];
+  var valid=src.filter(function(e){
+    return e&&isFinite(+e.x1)&&isFinite(+e.y1)&&isFinite(+e.x2)&&isFinite(+e.y2)&&
+      Math.hypot(e.x2-e.x1,e.y2-e.y1)>1e-7;
+  });
+  var gaps=[];
+  for(var i=0;i<src.length;i++){
+    var a=src[i],b=src[(i+1)%src.length];
+    if(!a||!b) continue;
+    var gap=Math.hypot((+a.x2)-(+b.x1),(+a.y2)-(+b.y1));
+    if(gap>1e-7) gaps.push({after_edge:i,gap_mm:gap,
+      from:{x:+a.x2,y:+a.y2},to:{x:+b.x1,y:+b.y1}});
+  }
+  var xs=[],ys=[];
+  src.forEach(function(e){if(!e)return;xs.push(+e.x1,+e.x2);ys.push(+e.y1,+e.y2);});
+  console.warn('[N2G CUTTINGLINE SKIP TRACE]',{
+    stage:stage,reason:reason,strategy:strategy,tool_radius_mm:+halfD||0,
+    layer:src[0]&&src[0].layer,group_ids:Array.from(new Set(src.map(function(e){return e&&e.group_id;}))),
+    part_ids:Array.from(new Set(src.map(function(e){return e&&e.part_id;}))),
+    source_edge_count:src.length,valid_edge_count:valid.length,
+    signed_area:valid.length>=3?polySignedAreaJS(valid.map(function(e){return{x:+e.x1,y:+e.y1};})):null,
+    bbox:xs.length?{xMin:Math.min.apply(null,xs),xMax:Math.max.apply(null,xs),
+      yMin:Math.min.apply(null,ys),yMax:Math.max.apply(null,ys)}:null,
+    gap_count:gaps.length,max_gap_mm:gaps.length?Math.max.apply(null,gaps.map(function(g){return g.gap_mm;})):0,
+    gaps:gaps.slice(0,20),extra:extra||{},source_edges:src
+  });
+}
+
 function profileExactCutOutOffsetJS(loop,halfD){
   if(!profileExactCutOutOffsetJS._trimDebugLoaded && typeof console!=='undefined'){
     console.info('[N2G PROFILE TRIM LOADED] diagnostic-v2');
     profileExactCutOutOffsetJS._trimDebugLoaded=true;
   }
-  if(!loop||loop.length<3||!(halfD>0)) return [];
+  if(!loop||loop.length<3||!(halfD>0)){
+    profileSkipDebugJS('exact_input','invalid_input',loop,halfD,'cut_out');
+    return [];
+  }
   var edges=loop.filter(function(e){return Math.hypot(e.x2-e.x1,e.y2-e.y1)>1e-7;});
-  if(edges.length<3) return [];
+  if(edges.length<3){
+    profileSkipDebugJS('exact_filter','under_3_valid_edges',loop,halfD,'cut_out',{filtered_edges:edges});
+    return [];
+  }
   var verts=edges.map(function(e){return{x:+e.x1,y:+e.y1};});
   var area=polySignedAreaJS(verts);
-  if(Math.abs(area)<1e-9) return [];
+  if(Math.abs(area)<1e-9){
+    profileSkipDebugJS('exact_area','near_zero_signed_area',loop,halfD,'cut_out',{signed_area:area});
+    return [];
+  }
   var side=area>0?1:-1, shifted=[];
   edges.forEach(function(e){
     var dx=e.x2-e.x1,dy=e.y2-e.y1,len=Math.hypot(dx,dy);
@@ -516,6 +555,10 @@ function profileExactCutOutOffsetJS(loop,halfD){
     turnCos=Math.max(-1,Math.min(1,turnCos));
     var interiorAngle=Math.PI-Math.acos(turnCos);
     var sharpConvex=convex && interiorAngle<Math.PI/2-1e-7;
+    // For a concave vertex this is the opening angle of the inward notch.
+    // The special relief/trim is reserved for genuinely narrow notches only;
+    // square (90 deg) and wider concave corners keep their normal miter.
+    var narrowConcave=!convex && interiorAngle<Math.PI/2-1e-7;
     var sharpOutsideEnabled=typeof STG!=='undefined' && STG.sharp_outside_corner===true;
     var miterDistance=Math.hypot(hit.x-v.x,hit.y-v.y);
     var useSharpMiter=sharpConvex && sharpOutsideEnabled &&
@@ -523,12 +566,16 @@ function profileExactCutOutOffsetJS(loop,halfD){
     if(!convex){
       concaveCount++;
       maxConcaveExtension=Math.max(maxConcaveExtension,d1,d2);
+    }
+    if(narrowConcave && (d1>halfD+1e-7 || d2>halfD+1e-7)){
+      concaveArcCount++;
+      // Only corners that actually generate the special concave relief arc
+      // may participate in the later local self-intersection trim. Ordinary
+      // square/short steps (extension <= R) already have a valid miter and
+      // must retain every source section.
       concaveDiagnostics.push({edge_index:i,output_index:out.length,vertex:v,
         nominal_intersection:hit,extension_mm:Math.max(d1,d2),
         source_gap_mm:Math.hypot(ep.x2-ec.x1,ep.y2-ec.y1)});
-    }
-    if(!convex && (d1>halfD+1e-7 || d2>halfD+1e-7)){
-      concaveArcCount++;
       // Goc lom gan quay dau: giao hai duong offset co the tao mui kim rat
       // dai. Noi hai diem tiep tuyen bang CUNG NGAN R=ban kinh dao ngay trong
       // khe; khong di toi giao diem xa va khong vong cung dai xuong phia duoi.
@@ -651,11 +698,18 @@ function profileExactCutOutOffsetJS(loop,halfD){
     var rotation=(start-windowSize+out.length)%out.length;
     var work=out.slice(rotation).concat(out.slice(0,rotation));
     var localStart=windowSize,localEnd=localStart+span-1,best=null;
+    // This trim repairs only the small self-crossing produced around the
+    // current concave corner. A crossing with another distant side of the
+    // part is unrelated and must never remove that valid section of the loop.
+    var maxLocalTrimDistance=4*Math.abs(halfD)+1e-7;
     for(var si=0;si<localStart;si++){
       for(var sj=localEnd+windowSize-1;sj>=localEnd;sj--){
         if(sj<=si+1) continue;
         var crossing=segmentHit(work[si],work[si+1],work[sj],work[sj+1]);
-        if(crossing){best={si:si,sj:sj,point:crossing};break;}
+        if(crossing && Math.hypot(crossing.x-corner.vertex.x,
+                                  crossing.y-corner.vertex.y)<=maxLocalTrimDistance){
+          best={si:si,sj:sj,point:crossing};break;
+        }
       }
       // First crossing encountered along the incoming path; prefer the last
       // outgoing crossing at that segment to remove both reversed spurs.
@@ -674,21 +728,37 @@ function profileExactCutOutOffsetJS(loop,halfD){
     out=work;
   });
   out.forEach(function(p){delete p._n2gConcaveArc;delete p._n2gConcaveCorner;});
+  if(out.length<3){
+    profileSkipDebugJS('exact_output','under_3_output_points',loop,halfD,'cut_out',{
+      output_point_count:out.length,output_points:out,concave_diagnostics:concaveDiagnostics
+    });
+  }
   return out;
 }
 
 function profileOffsetClipper(loop, halfD, strategy){
   if(typeof ClipperLib==='undefined' || !loop || loop.length<3 ||
-     (strategy!=='cut_in' && strategy!=='cut_out')) return [];
+     (strategy!=='cut_in' && strategy!=='cut_out')){
+    profileSkipDebugJS('offset_input','offset_precondition_failed',loop,halfD,strategy,{
+      clipper_loaded:typeof ClipperLib!=='undefined'
+    });
+    return [];
+  }
   if(strategy==='cut_out'){
     var exact=profileExactCutOutOffsetJS(loop,Math.abs(halfD));
+    if(exact.length<3) profileSkipDebugJS('offset_output','exact_cut_out_empty',loop,halfD,strategy,{
+      output_point_count:exact.length,output_points:exact
+    });
     return exact.length>=3?[exact]:[];
   }
   var scale=1000;
   var work=loop.filter(function(e){return Math.hypot(e.x2-e.x1,e.y2-e.y1)>1e-6;});
   var path=work.map(function(e){return {X:Math.round(e.x1*scale),Y:Math.round(e.y1*scale)};});
   if(path.length>3 && path[0].X===path[path.length-1].X && path[0].Y===path[path.length-1].Y) path.pop();
-  if(path.length<3) return [];
+  if(path.length<3){
+    profileSkipDebugJS('clipper_input','under_3_clipper_points',loop,halfD,strategy,{path:path});
+    return [];
+  }
   // Normalise winding so a positive cut_out delta always expands the outer
   // contour, independent of the direction in which SketchUp supplied edges.
   if(!ClipperLib.Clipper.Orientation(path)) path.reverse();
@@ -701,6 +771,9 @@ function profileOffsetClipper(loop, halfD, strategy){
     return poly && poly.length>=3 && Math.abs(ClipperLib.Clipper.Area(poly))>=10;
   }).map(function(poly){
     return poly.map(function(p){return {x:p.X/scale,y:p.Y/scale};});
+  });
+  if(!runs.length) profileSkipDebugJS('clipper_output','clipper_returned_no_runs',loop,halfD,strategy,{
+    raw_solution_count:solution.length,raw_solution:solution
   });
   return runs;
 }

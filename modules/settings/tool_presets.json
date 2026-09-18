@@ -305,22 +305,6 @@
         "z_feed": 3000,
         "max_depth": 20,
         "tool_number": 1
-      },
-      {
-        "layer": "ABF_GROOVE",
-        "name": "T1D6",
-        "diameter": 6,
-        "type": "drill",
-        "strategy": "drill",
-        "bit_type": "flat",
-        "vbit_angle": 120,
-        "depth": "Z",
-        "stepover": 90,
-        "rpm": 18000,
-        "feed": 12000,
-        "z_feed": 3000,
-        "max_depth": 20,
-        "tool_number": 1
       }
     ]
   }

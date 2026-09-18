@@ -512,12 +512,20 @@ function n2gBuildProfilePathsForExport(){
         if(isCuttingLayer && !loop._closed && loop.length===1){
           var lone=loop[0];
           var loneLen=Math.hypot(lone.x2-lone.x1,lone.y2-lone.y1);
-          if(loneLen < (+tool.diameter||0)) return;
+          if(loneLen < (+tool.diameter||0)){
+            if(typeof profileSkipDebugJS==='function') profileSkipDebugJS(
+              'export_filter','short_open_cuttingline_fragment',loop,tool.diameter/2,tool.strategy,
+              {sheet:sheet.name,tool:tool,length_mm:loneLen,closed:!!loop._closed});
+            return;
+          }
         }
         var strategy=islands[li] ? 'cut_in' : tool.strategy;
         var circ=detectCircleJS(loop);
         var tooSmallCircle=!!circ && strategy==='cut_in' && circ.r <= (+tool.diameter||0)/2 + 0.001;
         if(tooSmallCircle){
+          if(typeof profileSkipDebugJS==='function') profileSkipDebugJS(
+            'export_filter','cut_in_circle_smaller_than_tool',loop,tool.diameter/2,strategy,
+            {sheet:sheet.name,tool:tool,circle:circ});
           records.push({id:profileLoopIdJS(loop),key:profileLoopKeyJS(loop),strategy:strategy,
             mode:'skip',runs:[],reason:'tool_too_large',closed:!!loop._closed,
             island:!!islands[li],source_edges:sourceEdges});
