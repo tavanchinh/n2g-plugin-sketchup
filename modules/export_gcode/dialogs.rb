@@ -874,6 +874,8 @@ module N2G
               double_cut:       stg["double_cut"] != false,
               dc_offset:        (stg["double_cut_offset"] || 2.5).to_f,
               slowdown:         stg["slowdown"] == true,
+              sharp_outside_corner: stg["sharp_outside_corner"] == true,
+              auto_update:       stg["auto_update"] != false,
               arc_interp:       stg["arc_interp"] == true,
               arc_min_r:        (stg["arc_min_r"] || 60).to_f,
               small_threshold:  (stg["small_threshold"] || 300).to_f,

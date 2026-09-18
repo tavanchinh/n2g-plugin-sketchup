@@ -522,6 +522,21 @@
         </div>
       </div>
 
+      <!-- Sharp outside corners for Profile cut_out -->
+      <div class="stg-row">
+        <div class="stg-left">
+          <div class="stg-label">G&oacute;c ngo&agrave;i sắc cạnh</div>
+          <div class="stg-desc">Chỉ Profile cut_out: tạo đỉnh sắc cho g&oacute;c lồi nhỏ hơn 90&deg;, giới hạn đường t&acirc;m dao ở 4R</div>
+        </div>
+        <div class="stg-right">
+          <label class="stg-check">
+            <input type="checkbox" id="stg-sharp-outside-corner" onchange="stgUpdate()">
+            <span class="stg-check-label">K&eacute;o hai cạnh offset tới giao điểm</span>
+          </label>
+          <div class="stg-desc">Nếu giao điểm xa hơn 4R, tự động chuyển sang cung tr&ograve;n an to&agrave;n.</div>
+        </div>
+      </div>
+
       <!-- Tên file -->
       <div class="stg-row">
         <div class="stg-left">
@@ -694,6 +709,11 @@
           <button class="tbtn tbtn-p" id="btn-check-update" onclick="checkUpdateManual()" style="font-size:12px;padding:7px 16px">
             🔄 Kiểm tra bản cập nhật
           </button>
+          <label class="stg-check" style="margin-top:12px">
+            <input type="checkbox" id="stg-auto-update" onchange="stgUpdate()" checked>
+            <span class="stg-check-label">Tự động cập nhật</span>
+          </label>
+          <div class="stg-desc">Bỏ chọn để chỉ kiểm tra và cập nhật khi bạn bấm nút phía trên.</div>
           <div id="update-status" style="font-size:11px;color:var(--text3);margin-top:8px"></div>
         </div>
       </div>

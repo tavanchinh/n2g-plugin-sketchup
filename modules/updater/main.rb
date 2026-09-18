@@ -89,12 +89,25 @@ module N2G
     end
 
     # ── Check update (chạy ngầm) ─────────────────────────────────────────────
+    def self.auto_update_enabled?
+      settings = N2G::Settings.load_app_settings
+      settings['auto_update'] != false
+    rescue => e
+      puts "N2G Updater: cannot read auto-update setting — #{e.message}"
+      true
+    end
+
     def self.check_async
+      unless auto_update_enabled?
+        puts 'N2G Updater: automatic update disabled by user'
+        return
+      end
+
       # Dùng UI.start_timer (main thread) thay Thread.new — SketchUp 2024/Windows
       # thường làm Net::HTTP trong Thread.new chết lặng lẽ. Timer delay 5s không block UI.
       UI.start_timer(5, false) do
         begin
-          check
+          check if auto_update_enabled?
         rescue => e
           puts "N2G Updater: async error — #{e.message}"
         end
@@ -102,6 +115,8 @@ module N2G
     end
 
     def self.check
+      return unless auto_update_enabled?
+
       cache = read_cache
       last_check = cache['last_check'].to_i
 
@@ -128,6 +143,10 @@ module N2G
       puts "N2G Updater: local=#{local_version_name}(#{local_code}) remote=#{remote['version_name']}(#{remote_code})"
 
       if remote_code > local_code
+        unless auto_update_enabled?
+          puts 'N2G Updater: automatic update cancelled by user'
+          return
+        end
         puts "N2G Updater: new version #{remote['version_name']} — installing..."
         download_and_install(remote)
       else

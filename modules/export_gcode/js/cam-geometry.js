@@ -503,13 +503,23 @@ function profileExactCutOutOffsetJS(loop,halfD){
       continue;
     }
 
-    // Do not let a sharp convex corner extend either offset edge farther than
-    // the cutter radius. A 90-degree corner extends exactly halfD and remains
-    // square; a sharper corner follows a radius-halfD arc on the waste side.
+    // Only convex corners whose source interior angle is below 90 degrees use
+    // the optional sharp-corner rule. When enabled, accept the true offset-line
+    // intersection only while its vertex distance L is at most 4R. Otherwise
+    // use the same radius-R round fallback as the disabled setting.
     var cross=np.dx*nc.dy-np.dy*nc.dx;
     var convex=cross*side>1e-10;
     var d1=Math.hypot(hit.x-p1.x,hit.y-p1.y);
     var d2=Math.hypot(hit.x-p2.x,hit.y-p2.y);
+    var prevLen=Math.hypot(np.dx,np.dy),nextLen=Math.hypot(nc.dx,nc.dy);
+    var turnCos=(np.dx*nc.dx+np.dy*nc.dy)/(prevLen*nextLen);
+    turnCos=Math.max(-1,Math.min(1,turnCos));
+    var interiorAngle=Math.PI-Math.acos(turnCos);
+    var sharpConvex=convex && interiorAngle<Math.PI/2-1e-7;
+    var sharpOutsideEnabled=typeof STG!=='undefined' && STG.sharp_outside_corner===true;
+    var miterDistance=Math.hypot(hit.x-v.x,hit.y-v.y);
+    var useSharpMiter=sharpConvex && sharpOutsideEnabled &&
+      miterDistance<=4*halfD+1e-7;
     if(!convex){
       concaveCount++;
       maxConcaveExtension=Math.max(maxConcaveExtension,d1,d2);
@@ -533,7 +543,7 @@ function profileExactCutOutOffsetJS(loop,halfD){
         out.push({x:v.x+Math.cos(lang)*halfD,y:v.y+Math.sin(lang)*halfD,
           _n2gConcaveArc:true});
       }
-    }else if(convex && (d1>halfD+1e-7 || d2>halfD+1e-7)){
+    }else if(sharpConvex && !useSharpMiter){
       var a1=Math.atan2(p1.y-v.y,p1.x-v.x);
       var a2=Math.atan2(p2.y-v.y,p2.x-v.x);
       var da=a2-a1;

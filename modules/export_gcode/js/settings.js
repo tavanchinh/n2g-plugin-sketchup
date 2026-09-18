@@ -13,6 +13,8 @@ var STG = {
   small_threshold: 300,
   double_cut_offset: 2.5,
   slowdown: false,
+  sharp_outside_corner: false,
+  auto_update: true,
   arc_interp: false,
   arc_min_r: 60,
   custom_name: false,
@@ -319,6 +321,10 @@ function stgApplyToUI(){
   document.getElementById('stg-small-threshold').value  = STG.small_threshold||300;
   document.getElementById('stg-double-cut-offset').value= STG.double_cut_offset||2.5;
   document.getElementById('stg-slowdown').checked       = !!STG.slowdown;
+  var _soc=document.getElementById('stg-sharp-outside-corner');
+  if(_soc) _soc.checked = STG.sharp_outside_corner === true;
+  var _au=document.getElementById('stg-auto-update');
+  if(_au) _au.checked = STG.auto_update !== false;
   var _ai=document.getElementById('stg-arc-interp'); if(_ai) _ai.checked = !!STG.arc_interp;
   var _ar=document.getElementById('stg-arc-min-r'); if(_ar) _ar.value = STG.arc_min_r||60;
   document.getElementById('stg-custom-name').checked    = !!STG.custom_name;
@@ -405,6 +411,10 @@ function stgUpdate(){
   STG.small_threshold  = +document.getElementById('stg-small-threshold').value||300;
   STG.double_cut_offset= +document.getElementById('stg-double-cut-offset').value||2.5;
   STG.slowdown         = document.getElementById('stg-slowdown').checked;
+  var _soc2=document.getElementById('stg-sharp-outside-corner');
+  STG.sharp_outside_corner = _soc2 ? _soc2.checked : false;
+  var _au2=document.getElementById('stg-auto-update');
+  STG.auto_update = _au2 ? _au2.checked : true;
   var _ai2=document.getElementById('stg-arc-interp'); STG.arc_interp = _ai2 ? _ai2.checked : false;
   var _ar2=document.getElementById('stg-arc-min-r'); STG.arc_min_r = _ar2 ? (+_ar2.value||60) : 60;
   STG.custom_name      = cn;

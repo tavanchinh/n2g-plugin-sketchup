@@ -51,5 +51,7 @@
   "ramp_len": 20,
   "arc_interp": false,
   "arc_min_r": 60,
-  "long_final_edge": true
+  "long_final_edge": true,
+  "sharp_outside_corner": true,
+  "auto_update": true
 }
