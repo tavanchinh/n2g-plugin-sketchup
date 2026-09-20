@@ -676,6 +676,13 @@ async function onLayerChange(i, sel){
 
 function validateDepth(input){
   const raw = input.value.trim();
+  // Z alone means the actual sheet thickness; keep it as a formula string.
+  if(/^[Zz]$/.test(raw)){
+    input.style.color = 'var(--accent)';
+    input.title = 'Độ sâu bằng độ dày thực tế của tấm';
+    input.value = 'Z';
+    return 'Z';
+  }
   // Formula: Z-1.2 hoặc Z+0.1
   const formula = raw.match(/^[Zz]([+-]\d+(?:\.\d+)?)$/);
   if(formula){
