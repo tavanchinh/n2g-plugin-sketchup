@@ -896,7 +896,9 @@ module N2G
               afv_sel:          stg["afv_sel"] || {},
               cut_order:        config["cut_order"] || {},
               pocket_paths:     config["pocket_paths"] || {},
-              profile_engine:   config["profile_engine"] || "legacy",
+              # Closed Profile paths are serialized by JS. Never silently fall
+              # back to Ruby legacy geometry when an older UI omits this key.
+              profile_engine:   config["profile_engine"] || "clipper",
               profile_paths:    config["profile_paths"] || {},
               tool_jobs:        tool_jobs,
               # Override điểm xuống dao thủ công (tab Xem đường dao)

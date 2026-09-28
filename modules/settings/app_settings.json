@@ -2,7 +2,7 @@
   "antiflyout": true,
   "entry_backoff": true,
   "entry_backoff_mm": 20,
-  "double_cut": true,
+  "double_cut": false,
   "small_threshold": 200,
   "double_cut_offset": 2.5,
   "slowdown": true,

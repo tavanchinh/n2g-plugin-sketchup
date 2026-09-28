@@ -93,7 +93,8 @@ function redrawAllSheets() {
     const si = parseInt(cv.dataset.sheetIdx, 10);
     if (isNaN(si) || !SHEETS[si]) return;
     if (cv.dataset.drawn === '1') {
-      drawSheet(cv, SHEETS[si], cv.width, cv.height);   // đã hiện → vẽ lại ngay
+      cv.dataset.drawn = '0';
+      _drawCanvasIfNeeded(cv, true);
     } else {
       cv.dataset.drawn = '0';                            // chưa hiện → để lazy vẽ sau
       if (_lazyObserver) { try { _lazyObserver.observe(cv); } catch(e){} }
@@ -201,7 +202,16 @@ function renderSheets(){
     cv.dataset.logicalWidth=CW;cv.dataset.logicalHeight=CH;cv.dataset.dpr=dpr;
     cv.dataset.sheetIdx=si;      // để vẽ on-demand theo index
     cv.dataset.drawn='0';        // chưa vẽ
-    card.appendChild(cv);
+    const canvasWrap=document.createElement('div');
+    canvasWrap.className='sheet-canvas-wrap';
+    canvasWrap.appendChild(cv);
+    const loading=document.createElement('div');
+    loading.className='sheet-loading';
+    loading.innerHTML='<span class="sheet-loading-spinner"></span>'+
+      '<span>Đang dựng '+(pc+dc).toLocaleString('vi-VN')+' vector…</span>';
+    canvasWrap.appendChild(loading);
+    card.classList.add('is-loading');
+    card.appendChild(canvasWrap);
     const ft=document.createElement('div');ft.className='sheet-footer';
     ft.innerHTML=`<button class="tbtn tbtn-o" style="width:100%;justify-content:center;font-size:11px;padding:5px 0" onclick="event.stopPropagation();openToolpathModal(SHEETS[${si}])">⚙ Chi tiết</button>`;
     card.appendChild(ft);main.appendChild(card);
@@ -223,19 +233,31 @@ var CUSTOM_CUT_ORDER = {};
 var _lazyObserver = null;
 
 // Vẽ 1 canvas nếu chưa vẽ (idempotent). Trả true nếu vừa vẽ.
-function _drawCanvasIfNeeded(cv){
-  if(!cv || cv.dataset.drawn==='1') return false;
+function _drawCanvasIfNeeded(cv,deferPaint){
+  if(!cv || cv.dataset.drawn==='1' || cv.dataset.drawn==='loading') return false;
   var si = parseInt(cv.dataset.sheetIdx, 10);
   if(isNaN(si) || !SHEETS[si]) return false;
-  drawSheet(cv, SHEETS[si], cv.width, cv.height);
-  cv.dataset.drawn='1';
+  var card=cv.closest ? cv.closest('.sheet-card') : null;
+  cv.dataset.drawn='loading';
+  if(card) card.classList.add('is-loading');
+  var run=function(){
+    try{
+      drawSheet(cv, SHEETS[si], cv.width, cv.height);
+      cv.dataset.drawn='1';
+    }finally{
+      if(card) card.classList.remove('is-loading');
+    }
+  };
+  if(deferPaint!==false && typeof requestAnimationFrame==='function'){
+    requestAnimationFrame(function(){ setTimeout(run,0); });
+  }else run();
   return true;
 }
 
 // Đảm bảo canvas của sheet index si đã được vẽ (dùng cho focusLayer on-demand).
 function _ensureSheetDrawn(si){
   var cv = document.querySelector('#preview-content canvas[data-sheet-idx="'+si+'"]');
-  if(cv) _drawCanvasIfNeeded(cv);
+  if(cv) _drawCanvasIfNeeded(cv,false);
 }
 
 // Thiết lập lazy render cho tất cả canvas hiện có.
@@ -246,7 +268,7 @@ function _setupLazyRender(){
 
   // Fallback: không có IntersectionObserver (trình duyệt rất cũ) → vẽ hết như cũ.
   if(typeof IntersectionObserver==='undefined'){
-    canvases.forEach(function(cv){ _drawCanvasIfNeeded(cv); });
+    canvases.forEach(function(cv){ _drawCanvasIfNeeded(cv,true); });
     return;
   }
 
@@ -254,7 +276,7 @@ function _setupLazyRender(){
   _lazyObserver = new IntersectionObserver(function(entries){
     entries.forEach(function(en){
       if(en.isIntersecting){
-        _drawCanvasIfNeeded(en.target);
+        _drawCanvasIfNeeded(en.target,true);
         _lazyObserver.unobserve(en.target);   // vẽ xong thì thôi theo dõi
       }
     });

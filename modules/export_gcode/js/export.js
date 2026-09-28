@@ -470,16 +470,36 @@ function n2gProfileSkipReasonJS(loop,halfD){
   if(typeof ClipperLib==='undefined') return 'Thiếu thư viện Clipper trong giao diện.';
   if(!(halfD>0)) return 'Đường kính dao không hợp lệ.';
   var edges=loop.filter(function(e){return Math.hypot(e.x2-e.x1,e.y2-e.y1)>1e-7;});
-  if(edges.length<3) return 'Biên dạng còn dưới 3 cạnh hợp lệ.';
+  if(edges.length<3) return 'Có đoạn vector rời hoặc chưa nối vào biên dạng chính; đoạn này không tạo thành vùng kín để bù dao.';
   var area=polySignedAreaJS(edges.map(function(e){return{x:e.x1,y:e.y1};}));
   if(Math.abs(area)<1e-9) return 'Diện tích có dấu gần bằng 0; cần kiểm tra biên dạng tự giao hoặc suy biến.';
   return 'Offset không tạo được đường tâm dao hợp lệ; cần kiểm tra hình học tại vị trí này.';
 }
 
+function n2gProfileWarningContextJS(loop,vecs){
+  if(!loop||!loop.length) return [];
+  var gid=loop[0].group_id;
+  var anchors=[];
+  loop.forEach(function(e){anchors.push({x:+e.x1,y:+e.y1},{x:+e.x2,y:+e.y2});});
+  return (vecs||[]).filter(function(e){
+    return loop.indexOf(e)<0 && (gid==null||e.group_id===gid);
+  }).map(function(e){
+    var d=Infinity;
+    anchors.forEach(function(p){
+      d=Math.min(d,Math.hypot((+e.x1)-p.x,(+e.y1)-p.y),
+        Math.hypot((+e.x2)-p.x,(+e.y2)-p.y));
+    });
+    return {edge:e,distance:d};
+  }).filter(function(x){return x.distance<=10;})
+    .sort(function(a,b){return a.distance-b.distance;}).slice(0,12)
+    .map(function(x){return x.edge;});
+}
+
 function n2gBuildProfilePathsForExport(){
   var out={};
   _n2gProfileExportWarnings=[];
-  var engine=(typeof window!=='undefined' && window.N2G_PROFILE_OFFSET_ENGINE) || 'clipper';
+  // Keep the export manifest on the same geometry engine as the canvas.
+  var engine='clipper';
   if(typeof SHEETS==='undefined' || typeof profileOffsetClipper!=='function') return out;
   SHEETS.forEach(function(sheet){
     (TOOLS||[]).filter(function(tool){
@@ -497,6 +517,8 @@ function n2gBuildProfilePathsForExport(){
         return{xMin:Math.min.apply(null,xs),xMax:Math.max.apply(null,xs),yMin:Math.min.apply(null,ys),yMax:Math.max.apply(null,ys)};
       });
       var islands=detectIslandJS(loops,bbs), records=[];
+      if(typeof profileCloseSmallIslandGapsJS==='function')
+        profileCloseSmallIslandGapsJS(loops,islands,0.75);
       loops.forEach(function(loop,li){
         // Manifest hinh hoc nguon do chinh JS da ghep. Ruby phai dung manifest
         // nay thay vi ghep lai cac vector va co the chon nham canh trong tolerance.
@@ -538,6 +560,29 @@ function n2gBuildProfilePathsForExport(){
         var runs=useClipper ? profileOffsetClipper(loop,tool.diameter/2,strategy) : [];
         var clipperOK=useClipper && Array.isArray(runs) && runs.length>0;
         var mode=clipperOK?'clipper':'legacy';
+        // Open cut_in/cut_out paths are also drawn from JS geometry. Serialize
+        // that exact centreline so Ruby never recalculates a different offset.
+        if(!loop._closed && !circ && (strategy==='cut_in'||strategy==='cut_out') &&
+           typeof offsetOpenCenterJS==='function'){
+          var jsOpenPts=offsetOpenCenterJS(loop.edges||loop,(+tool.diameter||0)/2,
+            strategy==='cut_out');
+          if(Array.isArray(jsOpenPts) && jsOpenPts.length>=2){
+            runs=[jsOpenPts];
+            mode='js_open_offset';
+          }
+        }
+        // Preview của CUT_IN kín ngoài phạm vi Clipper dùng offsetPolygonMiter ở JS.
+        // Gửi chính các điểm đó sang Ruby thay vì để Ruby tính offset legacy lần nữa.
+        // Với biên dạng cong gồm nhiều cạnh rất ngắn, bước làm sạch/ghép cạnh bên
+        // Ruby có thể chọn khác JS và tạo các răng cưa lớn dù preview vẫn trơn.
+        if(!useClipper && !circ && !!loop._closed && strategy==='cut_in' &&
+           typeof offsetPolygonMiter==='function'){
+          var jsOffsetPts=offsetPolygonMiter(loop,(+tool.diameter||0)/2,false);
+          if(Array.isArray(jsOffsetPts) && jsOffsetPts.length>=3){
+            runs=[jsOffsetPts];
+            mode='js_offset';
+          }
+        }
         if(useClipper && !clipperOK){
           if(strategy==='cut_in'){
             mode='skip';
@@ -549,6 +594,7 @@ function n2gBuildProfilePathsForExport(){
             runs=[];
             _n2gProfileExportWarnings.push({sheet:sheet.name,layer:tool.layer,
               diameter:+tool.diameter||0,id:profileLoopIdJS(loop),bbox:bbs[li],loop:loop,
+              context_edges:n2gProfileWarningContextJS(loop,vecs),
               reason:n2gProfileSkipReasonJS(loop,(+tool.diameter||0)/2)});
             if(typeof console!=='undefined' && console.warn){
               var ends=[{x:loop[0].x1,y:loop[0].y1},
@@ -590,7 +636,7 @@ function n2gBuildProfilePathsForExport(){
           }
         }
         records.push({id:profileLoopIdJS(loop),key:profileLoopKeyJS(loop),strategy:strategy,
-          mode:mode,runs:(mode==='clipper'||mode==='js_offset')?runs:[],
+          mode:mode,runs:(mode==='clipper'||mode==='js_offset'||mode==='js_open_offset')?runs:[],
           closed:!!loop._closed,island:!!islands[li],source_edges:sourceEdges});
       });
       if(records.length) out[sheet.name+'::'+tool.layer]=records;
@@ -605,7 +651,7 @@ var _n2gProfileExportWarnings=[];
 async function _doExportSend(){
   flushAll();
   var pocketPaths=n2gBuildPocketPathsForExport();
-  var profileEngine=(typeof window!=='undefined' && window.N2G_PROFILE_OFFSET_ENGINE) || 'clipper';
+  var profileEngine='clipper';
   var profilePaths=n2gBuildProfilePathsForExport();
   if(_n2gPocketExportWarnings.length || _n2gProfileExportWarnings.length){
     var ov=document.getElementById('overlay'); if(ov) ov.style.display='none';
@@ -620,12 +666,12 @@ async function _doExportSend(){
         'border:1px solid #e9a6a6;border-radius:5px;background:#fff7f7;cursor:pointer">'+
         '• Sheet <b>'+esc(w.sheet)+'</b>, layer <b>'+esc(w.layer)+
         '</b>, dao D'+w.diameter.toFixed(3)+' mm — <b>bấm để xem vị trí</b><br>'+
-        '<small>Gần X'+cx.toFixed(2)+' Y'+cy.toFixed(2)+' mm. '+esc(w.reason)+'</small></button>';
+        '<small>Vị trí được đánh dấu khi bấm xem lại. '+esc(w.reason)+'</small></button>';
     }).join('');
     var reviewWarning=null;
     var confirmPromise=showGConfirm(
-      'Chi tiết không phù hợp với dao',
-      'Một số vùng không tạo được đường chạy an toàn với đường kính dao hiện tại.'+
+      'Có vector chưa tạo được đường chạy',
+      'Một số đoạn vector đang rời, chưa khép kín hoặc không thể bù với đường kính dao hiện tại.'+
       '<div style="max-height:260px;overflow:auto;margin:10px 0">'+rows+'</div>'+
       '<span style="color:var(--text2)">Các vùng trên sẽ bị bỏ qua trong G-code.</span>',
       [

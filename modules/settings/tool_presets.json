@@ -260,8 +260,8 @@
         "bit_type": "flat",
         "vbit_angle": 120,
         "max_depth": 20,
-        "finish_thickness": 2,
-        "num_passes": 2,
+        "finish_thickness": 0,
+        "num_passes": 1,
         "z_passes": null,
         "z_passes_mode": null,
         "ramp_on": true,
@@ -269,7 +269,7 @@
       },
       {
         "layer": "ABF_CUTTINGLINES",
-        "name": "T1 D6",
+        "name": "T1D6",
         "diameter": 6,
         "type": "profile",
         "strategy": "cut_out",
@@ -287,8 +287,8 @@
         "max_depth": 20,
         "finish_thickness": 0,
         "num_passes": 1,
-        "ramp_on": false,
-        "ramp_len": 50
+        "ramp_on": true,
+        "ramp_len": 30
       },
       {
         "layer": "ABF_LASTCUT",

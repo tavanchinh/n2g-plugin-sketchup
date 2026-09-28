@@ -463,6 +463,16 @@ function drawToolpathPocket(ctx,vecs,tool,tx,ty,sc,dpr){
       return;
     }
 
+    // Resolve contained islands before any shape-specific fast path. Circle
+    // and dogbone branches used to return before reaching the generic island
+    // engine, so those outer contours could be pocketed through their islands.
+    var containedIslandLoops=[];
+    loops.forEach(function(other,oj){
+      if(oj===li||!isIsland[oj]) return;
+      if(loopInsideLoopJS(other,loop)) containedIslandLoops.push(other);
+    });
+    var _hasIslandInside=containedIslandLoops.length>0;
+
     const maxPasses=Math.ceil(Math.min(bxMax-bxMin,byMax-byMin)/(2*stepoverMM))+2;
 
     // ── Dogbone check: vẽ đường chạy dao mộng dogbone (khớp write_pocket_dogbone) ──
@@ -470,7 +480,7 @@ function drawToolpathPocket(ctx,vecs,tool,tx,ty,sc,dpr){
     var dog=detectDogboneJS(dogPts, halfD);
     // Dogbone NGHIÊNG: nếu không nhận thẳng trục, thử xoay về thẳng trục.
     var dogRot = dog ? null : detectDogboneRotatedJS(dogPts, halfD);
-    if(dog || dogRot){
+    if((dog || dogRot) && !_hasIslandInside){
       // Dogbone engine. Clipper offsets the REAL dogbone contour, including all
       // relief ears. Set window.N2G_POCKET_DOGBONE_ENGINE='legacy' to restore
       // the previous rectangle-body + four corner plunges algorithm.
@@ -562,7 +572,7 @@ function drawToolpathPocket(ctx,vecs,tool,tx,ty,sc,dpr){
     }
 
     const circ=detectCircleJS(loop);
-    if(circ){
+    if(circ && !_hasIslandInside){
       var currentR=circ.r-halfD;
       var p=0;
       while(currentR>0.01&&p<maxPasses){

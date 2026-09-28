@@ -76,6 +76,8 @@ function drawToolpathProfile(ctx,vecs,tool,tx,ty,sc,dpr){
     return{xMin:Math.min(...xs),xMax:Math.max(...xs),yMin:Math.min(...ys),yMax:Math.max(...ys)};
   });
   const isIsland=detectIslandJS(loops,bbs);
+  if(typeof profileCloseSmallIslandGapsJS==='function')
+    profileCloseSmallIslandGapsJS(loops,isIsland,0.75);
 
   loops.forEach((loop,li)=>{
     // Override strategy nếu là island — vẫn màu cut_out nhưng nét mảnh hơn
@@ -124,7 +126,9 @@ function drawToolpathProfile(ctx,vecs,tool,tx,ty,sc,dpr){
       // Loop kín: dùng offsetPolygonMiter (miter join chuẩn, không méo ở hình nhiều góc lõm
       // như mộng dương). Loop hở: giữ offsetLoopJS. dist>0 của miter = vào trong nên đảo dấu.
       var profileClipperExtra=[];
-      var profileEngine=(typeof window!=='undefined' && window.N2G_PROFILE_OFFSET_ENGINE) || 'clipper';
+      // Closed profile geometry must use the same JS source for preview and export.
+      // The old global legacy override could silently make Ruby recalculate islands.
+      var profileEngine='clipper';
       var profileScopeOK=(typeof profileClipperAppliesJS==='function') ?
         profileClipperAppliesJS(!!isIsland[li],strategy) : !!isIsland[li];
       if(loop._closed && (profileEngine!=='legacy'||strategy==='cut_out') && profileScopeOK &&

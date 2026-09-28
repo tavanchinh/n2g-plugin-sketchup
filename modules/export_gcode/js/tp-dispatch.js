@@ -1036,6 +1036,13 @@ function redrawToolpath(options){
     ctx.save();
     ctx.setLineDash([]);
     ctx.lineCap='round';
+    var contextEdges=tpZm.profileWarning.context_edges||[];
+    ctx.strokeStyle='rgba(245,158,11,0.9)';
+    ctx.lineWidth=3*dpr;
+    contextEdges.forEach(function(e){
+      ctx.beginPath();ctx.moveTo(tx(e.x1),ty(e.y1));
+      ctx.lineTo(tx(e.x2),ty(e.y2));ctx.stroke();
+    });
     [4,2].forEach(function(width,pass){
       ctx.strokeStyle=pass===0?'#ffffff':'#e11d48';
       ctx.lineWidth=width*dpr;
@@ -1044,6 +1051,14 @@ function redrawToolpath(options){
         ctx.lineTo(tx(e.x2),ty(e.y2));ctx.stroke();
       });
     });
+    var wf=warningLoop[0],wl=warningLoop[warningLoop.length-1];
+    if(wf&&wl){
+      [{x:wf.x1,y:wf.y1},{x:wl.x2,y:wl.y2}].forEach(function(p){
+        ctx.beginPath();ctx.arc(tx(p.x),ty(p.y),5*dpr,0,Math.PI*2);
+        ctx.fillStyle='#ffffff';ctx.fill();ctx.lineWidth=2*dpr;
+        ctx.strokeStyle='#e11d48';ctx.stroke();
+      });
+    }
     ctx.restore();
   }
 }

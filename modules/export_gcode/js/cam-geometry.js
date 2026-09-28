@@ -461,6 +461,20 @@ function profileClipperAppliesJS(isIsland,strategy){
 // when neighbouring radius envelopes overlap. Every source edge stays parallel
 // at exactly halfD and consecutive offset lines meet at one miter point. This
 // deliberately keeps right-angle vectors square and avoids verbose arc points.
+// A long contour can be fully chained yet retain a tiny terminal sampling gap.
+// Do not widen the edge-to-edge join tolerance: only close the final gap after
+// containment has independently identified the contour as an island.
+function profileCloseSmallIslandGapsJS(loops,islands,maxGap){
+  var limit=(+maxGap>0)?+maxGap:0.75;
+  (loops||[]).forEach(function(loop,i){
+    if(!islands||islands[i]!==true||!loop||loop._closed||loop.length<3) return;
+    var first=loop[0],last=loop[loop.length-1];
+    var gap=Math.hypot((+last.x2)-(+first.x1),(+last.y2)-(+first.y1));
+    if(gap<=limit) loop._closed=true;
+  });
+  return loops;
+}
+
 function profileSkipDebugJS(stage,reason,loop,halfD,strategy,extra){
   if(typeof console==='undefined'||!console.warn) return;
   var src=Array.isArray(loop)?loop:[];
@@ -2082,7 +2096,14 @@ function detectCircleJS(loop){
   const bboxCx=(Math.min(...xs)+Math.max(...xs))/2;
   const bboxCy=(Math.min(...ys)+Math.max(...ys))/2;
   const centerOk = Math.abs(cc.x-bboxCx) < r*0.1 && Math.abs(cc.y-bboxCy) < r*0.1;
-  if(ratio >= 1.15 || !centerOk) return null; // viên thuốc hoặc shape bất thường
+  const diameter=2*r;
+  const diameterTol=Math.max(0.2, r*0.20);
+  const fillsDiameter=Math.abs(bw-diameter)<=diameterTol &&
+                      Math.abs(bh-diameter)<=diameterTol;
+  const perimeter=loop.reduce((sum,e)=>sum+Math.hypot(e.x2-e.x1,e.y2-e.y1),0);
+  const perimeterRatio=perimeter/(Math.PI*diameter);
+  if(ratio >= 1.15 || !centerOk || !fillsDiameter ||
+     perimeterRatio < 0.94 || perimeterRatio > 1.03) return null;
 
   return {cx:cc.x, cy:cc.y, r};
 }
@@ -2323,6 +2344,12 @@ function buildProfileLoopsJS(vecs){
         if(gap<0.5) candidates.push({target:target,index:index,before:before,
           edges:oriented,gap:gap});
       }
+      function addBridgeCandidate(target,index,oriented,left,right){
+        // Both ends may contain tiny numeric gaps. Accept only when the whole
+        // fragment bridges one explicit slot between two adjacent edges.
+        if(left<0.5&&right<0.5) candidates.push({target:target,index:index,
+          before:false,edges:oriented,gap:Math.max(left,right),bridge:true});
+      }
       for(var ti=0;ti<loops.length;ti++){
         var target=loops[ti];
         if(ti===fi||target.length<=frag.length||!target.length||target[0].group_id!==gid) continue;
@@ -2339,9 +2366,33 @@ function buildProfileLoopsJS(vecs){
             addCandidate(target,ei,true,frag,distance(prev.x2,prev.y2,fs.x,fs.y));
           if(distance(edge.x1,edge.y1,fs.x,fs.y)<0.001)
             addCandidate(target,ei,true,rev,distance(prev.x2,prev.y2,fe.x,fe.y));
+          addBridgeCandidate(target,ei+1,frag,
+            distance(edge.x2,edge.y2,fs.x,fs.y),
+            distance(fe.x,fe.y,next.x1,next.y1));
+          addBridgeCandidate(target,ei+1,rev,
+            distance(edge.x2,edge.y2,fe.x,fe.y),
+            distance(fs.x,fs.y,next.x1,next.y1));
         }
       }
       candidates.sort(function(a,b){return a.gap-b.gap;});
+      // The same insertion slot can be discovered from both adjacent edges.
+      // Collapse those duplicate descriptions before deciding that the repair
+      // is ambiguous; otherwise a perfectly continuous tiny corner fragment
+      // is left as a false 1-2 edge loop.
+      var uniqueCandidates=[];
+      candidates.forEach(function(c){
+        var c0=c.edges[0],c1=c.edges[c.edges.length-1];
+        var duplicate=uniqueCandidates.some(function(u){
+          var ci=c.target.length ? c.index%c.target.length : c.index;
+          var ui=u.target.length ? u.index%u.target.length : u.index;
+          if(u.target!==c.target||ui!==ci||u.edges.length!==c.edges.length) return false;
+          var u0=u.edges[0],u1=u.edges[u.edges.length-1];
+          return distance(c0.x1,c0.y1,u0.x1,u0.y1)<0.001 &&
+                 distance(c1.x2,c1.y2,u1.x2,u1.y2)<0.001;
+        });
+        if(!duplicate) uniqueCandidates.push(c);
+      });
+      candidates=uniqueCandidates;
       // Neu hai cach chen tot ngang nhau, giu canh bao thay vi tu chon va tao
       // duong cat xien sang nhanh khac.
       if(!candidates.length || (candidates.length>1 &&

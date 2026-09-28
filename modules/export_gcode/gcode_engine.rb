@@ -497,9 +497,17 @@ module N2G
         ratio = [bw,bh].max / [[bw,bh].min,0.001].max
         bbox_cx = (xs.min+xs.max)/2.0; bbox_cy = (ys.min+ys.max)/2.0
         tol = [fit[:r].to_f*0.015,1.5].max
+        diameter = fit[:r].to_f*2.0
+        diameter_tol = [0.2,fit[:r].to_f*0.20].max
+        fills_diameter = (bw-diameter).abs <= diameter_tol && (bh-diameter).abs <= diameter_tol
+        perimeter = edges.sum do |e|
+          Math.hypot(e[:x2].to_f-e[:x1].to_f,e[:y2].to_f-e[:y1].to_f)
+        end
+        perimeter_ratio = perimeter/(Math::PI*diameter)
         fit[:max_error].to_f <= tol && ratio < 1.15 &&
           (fit[:cx].to_f-bbox_cx).abs < fit[:r].to_f*0.1 &&
-          (fit[:cy].to_f-bbox_cy).abs < fit[:r].to_f*0.1
+          (fit[:cy].to_f-bbox_cy).abs < fit[:r].to_f*0.1 &&
+          fills_diameter && perimeter_ratio >= 0.94 && perimeter_ratio <= 1.03
       rescue StandardError
         false
       end
@@ -3109,9 +3117,9 @@ module N2G
               # Danh dau da dung record nhung khong dua loop vao danh sach xuat.
               used_records[rec_i] = true
               next
-            elsif (mode == 'clipper' || mode == 'js_offset') && (!runs.is_a?(Array) || runs.empty?)
+            elsif (mode == 'clipper' || mode == 'js_offset' || mode == 'js_open_offset') && (!runs.is_a?(Array) || runs.empty?)
               raise "JS không tạo được offset Profile hợp lệ cho sheet '#{sheet_name}', layer '#{profile_layer}', loop '#{stable_id}'."
-            elsif mode == 'clipper' || mode == 'js_offset'
+            elsif mode == 'clipper' || mode == 'js_offset' || mode == 'js_open_offset'
               used_records[rec_i] = true
               rec_strategy = (rec['strategy'] || rec[:strategy]).to_s
               rec_island = rec_strategy == 'cut_in' && cfg[:strategy].to_s != 'cut_in'
@@ -3120,15 +3128,18 @@ module N2G
                   x = p['x'] || p[:x]; y = p['y'] || p[:y]
                   { x: x.to_f, y: y.to_f }
                 end
-                next if pts.size < 3
-                pts.pop if pts.size > 3 && Math.hypot(pts[-1][:x]-pts[0][:x], pts[-1][:y]-pts[0][:y]) < 0.001
+                open_js = mode == 'js_open_offset'
+                next if pts.size < (open_js ? 2 : 3)
+                pts.pop if !open_js && pts.size > 3 && Math.hypot(pts[-1][:x]-pts[0][:x], pts[-1][:y]-pts[0][:y]) < 0.001
                 meta = lp[:edges].first || {}
-                pre_edges = pts.each_with_index.map do |a, pi|
+                edge_count = open_js ? pts.size - 1 : pts.size
+                pre_edges = edge_count.times.map do |pi|
+                  a = pts[pi]
                   b = pts[(pi + 1) % pts.size]
                   { x1:a[:x], y1:a[:y], x2:b[:x], y2:b[:y],
                     group_id:meta[:group_id], part_id:meta[:part_id], layer:meta[:layer] }
                 end
-                expanded_loops << { edges:pre_edges, closed:true, _n2g_preoffset:true,
+                expanded_loops << { edges:pre_edges, closed:!open_js, _n2g_preoffset:true,
                                     _n2g_source_edges:lp[:edges], _n2g_island:rec_island }
               end
             else # mode legacy: circle, cut_on hoặc đường hở
@@ -3174,6 +3185,22 @@ module N2G
           threshold     = (app_settings[:small_threshold] || 300.0).to_f
           antiflyout_on = app_settings[:antiflyout] != false
           is_small      = antiflyout_on && is_cutting_layer && [bw_lp, bh_lp].min < threshold && !is_island
+
+          if is_cutting_layer || [bw_lp, bh_lp].min < threshold
+            path_x = edges.flat_map { |e| [e[:x1], e[:x2]] }
+            path_y = edges.flat_map { |e| [e[:y1], e[:y2]] }
+            path_w = path_x.empty? ? 0.0 : path_x.max - path_x.min
+            path_h = path_y.empty? ? 0.0 : path_y.max - path_y.min
+            puts "[N2G ANTIFLYOUT DEBUG] " \
+                 "sheet=#{app_settings[:sheet_name].inspect} " \
+                 "layer=#{cfg[:layer].inspect} normalized=#{_cutting_norm.inspect} " \
+                 "source_size_mm=[#{bw_lp.round(3)}, #{bh_lp.round(3)}] " \
+                 "path_size_mm=[#{path_w.round(3)}, #{path_h.round(3)}] " \
+                 "threshold_mm=#{threshold} antiflyout=#{antiflyout_on} " \
+                 "cutting_layer=#{is_cutting_layer} island=#{is_island} " \
+                 "small=#{is_small} preoffset=#{loop[:_n2g_preoffset] == true} " \
+                 "group_id=#{source_edges.first && source_edges.first[:group_id]}"
+          end
 
           # Ramp entry: đoạn dốc xuống dao. Setting theo DAO (cfg), chỉ cuttinglines.
           ramp_on  = cfg[:ramp_on] == true
@@ -3362,6 +3389,31 @@ module N2G
             is_open = !loop[:closed]
 
             if is_open
+              if is_cutting_layer
+                _dbg_edges = loop[:_n2g_source_edges] || edges
+                _dbg_first = _dbg_edges.first
+                _dbg_last  = _dbg_edges.last
+                _dbg_gap = if _dbg_first && _dbg_last
+                  Math.hypot(_dbg_last[:x2].to_f - _dbg_first[:x1].to_f,
+                             _dbg_last[:y2].to_f - _dbg_first[:y1].to_f)
+                end
+                _dbg_gid = _dbg_first && _dbg_first[:group_id]
+                _dbg_x = _dbg_edges.flat_map { |e| [e[:x1].to_f, e[:x2].to_f] }
+                _dbg_y = _dbg_edges.flat_map { |e| [e[:y1].to_f, e[:y2].to_f] }
+                puts "[N2G PROFILE OPEN BRANCH DEBUG] " \
+                     "sheet=#{sheet_name.inspect} layer=#{cfg[:layer].inspect} " \
+                     "group_id=#{_dbg_gid.inspect} edges=#{_dbg_edges.size} " \
+                     "endpoint_gap_mm=#{_dbg_gap && _dbg_gap.round(6)} " \
+                     "manifest=#{loop[:_n2g_manifest] == true} " \
+                     "preoffset=#{loop[:_n2g_preoffset] == true} " \
+                     "bbox=#{[_dbg_x.min, _dbg_x.max, _dbg_y.min, _dbg_y.max].inspect}"
+              end
+              if loop[:_n2g_preoffset]
+                # Exact open centreline supplied by the same JS function that
+                # drew the canvas. Preserve its point order and every segment.
+                off_pts = [{ x:edges.first[:x1], y:edges.first[:y1] }]
+                edges.each { |e| off_pts << { x:e[:x2], y:e[:y2] } }
+              else
               # Offset 1 bên theo TÂM bbox (KHÔNG phụ thuộc chiều vẽ): cut_out = ra
               # XA tâm (mặt ngoài), cut_in = về GẦN tâm (mặt trong). Áp cho C/L/U và
               # mọi hướng. Mở rộng thuật toán ABF_MARK_SQUARE (vốn chỉ xét xa-tâm cho
@@ -3415,6 +3467,7 @@ module N2G
               eL = edges[n - 1]
               sL = shift.call(eL[:x1], eL[:y1], eL[:x2], eL[:y2])
               off_pts << { x: eL[:x2] + sL[0], y: eL[:y2] + sL[1] } unless sL == [0.0, 0.0]
+              end
 
               next if off_pts.size < 2
               f.puts "G0 X#{format('%.3f',off_pts[0][:x])} Y#{format('%.3f',off_pts[0][:y])}"
@@ -3431,13 +3484,19 @@ module N2G
               else
                 # Nhiều lượt: nhấc lên safe-Z và về đầu path sau mỗi lượt trên.
                 emit_upper_passes(_zl_op) do |zl|
-                  f.puts "G1 Z#{format('%.3f',zl)} F#{z_feed}"
-                  off_pts[1..].each { |pt| f.puts "G1 X#{format('%.3f',pt[:x])} Y#{format('%.3f',pt[:y])} F#{feed}" }
+                  _state_op = { x:off_pts[0][:x], y:off_pts[0][:y], z:nil, f:nil }
+                  f.puts gcode_line('G1', z:zl, f:z_feed, state:_state_op)
+                  off_pts[1..].each do |pt|
+                    f.puts gcode_line('G1', x:pt[:x], y:pt[:y], f:feed, state:_state_op)
+                  end
                   f.puts "G0 Z#{format('%.1f',clear_z)}"
                   f.puts "G0 X#{format('%.3f',off_pts[0][:x])} Y#{format('%.3f',off_pts[0][:y])}"
                 end
-                f.puts "G1 Z#{format('%.3f',effective_cfg[:depth].to_f)} F#{z_feed}"
-                off_pts[1..].each { |pt| f.puts "G1 X#{format('%.3f',pt[:x])} Y#{format('%.3f',pt[:y])} F#{feed}" }
+                _state_op = { x:off_pts[0][:x], y:off_pts[0][:y], z:nil, f:nil }
+                f.puts gcode_line('G1', z:effective_cfg[:depth].to_f, f:z_feed, state:_state_op)
+                off_pts[1..].each do |pt|
+                  f.puts gcode_line('G1', x:pt[:x], y:pt[:y], f:feed, state:_state_op)
+                end
               end
               f.puts "G0 Z#{format('%.1f',clear_z)}" unless ramp_on
               next

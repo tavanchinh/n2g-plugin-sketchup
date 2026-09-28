@@ -216,7 +216,7 @@ module N2G
             bad = records.any? do |rec|
               mode = (rec['mode'] || rec[:mode]).to_s
               runs = rec['runs'] || rec[:runs]
-              (mode == 'clipper' || mode == 'js_offset') &&
+              (mode == 'clipper' || mode == 'js_offset' || mode == 'js_open_offset') &&
                 (!runs.is_a?(Array) || runs.empty?)
             end
             raise "JS không tạo được offset Profile hợp lệ cho sheet '#{sheet[:name]}', layer '#{layer}'." if bad
