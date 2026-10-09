@@ -760,6 +760,14 @@ function profileOffsetClipper(loop, halfD, strategy){
   }
   if(strategy==='cut_out'){
     var exact=profileExactCutOutOffsetJS(loop,Math.abs(halfD));
+    // For a sampled micro-detour (small circular recess/ear), independent
+    // segment offsets can create a centreline inside a space narrower than the
+    // cutter. Prefer the true outer Minkowski envelope, but only when the
+    // resulting contour passes containment and self-intersection checks.
+    if(profileHasMicroDetourJS(loop,Math.abs(halfD)*2)){
+      var envelope=profileSafeCutOutClipperJS(loop,Math.abs(halfD));
+      if(envelope.length) return envelope;
+    }
     if(exact.length<3) profileSkipDebugJS('offset_output','exact_cut_out_empty',loop,halfD,strategy,{
       output_point_count:exact.length,output_points:exact
     });
@@ -856,9 +864,10 @@ function profileRawCutOutClipperJS(loop,halfD){
   // ArcTolerance 0.02 mm: dây cung của jtRound không được lẹm đáng kể vào
   // vòng clearance D/2. Chỉ chạy cho loop micro đã phát hiện.
   var co=new ClipperLib.ClipperOffset(2,0.02*scale);
-  // Chỉ dùng cho micro-detour cut_out: round join tạo đường vòng ngoài theo
-  // bán kính dao, tránh miter sụp giữ một điểm tâm dao ngay trên vector.
-  co.AddPath(path,ClipperLib.JoinType.jtRound,ClipperLib.EndType.etClosedPolygon);
+  // Miter keeps ordinary 90-degree corners sharp. Clipper still applies its
+  // miter limit to acute spikes, while the global offset removes recesses that
+  // are physically narrower than the cutter.
+  co.AddPath(path,ClipperLib.JoinType.jtMiter,ClipperLib.EndType.etClosedPolygon);
   co.Execute(out,Math.abs(halfD)*scale);
   return out.filter(function(poly){return poly&&poly.length>=3&&Math.abs(ClipperLib.Clipper.Area(poly))>=10;})
     .map(function(poly){return poly.map(function(p){return{x:p.X/scale,y:p.Y/scale};});});
@@ -871,7 +880,7 @@ function profileCleanedCutOutClipperJS(loop,halfD){
   var cleaned=ClipperLib.Clipper.CleanPolygon(path,cleanTol),out=[];
   if(!cleaned||cleaned.length<3)return [];
   var co=new ClipperLib.ClipperOffset(2,0.02*scale);
-  co.AddPath(cleaned,ClipperLib.JoinType.jtRound,ClipperLib.EndType.etClosedPolygon);
+  co.AddPath(cleaned,ClipperLib.JoinType.jtMiter,ClipperLib.EndType.etClosedPolygon);
   co.Execute(out,Math.abs(halfD)*scale);
   return out.filter(function(poly){return poly&&poly.length>=3&&Math.abs(ClipperLib.Clipper.Area(poly))>=10;})
     .map(function(poly){return poly.map(function(p){return{x:p.X/scale,y:p.Y/scale};});});
@@ -892,7 +901,7 @@ function profileLocalMicroEnvelopeJS(loop,halfD){
   if(!cleaned||cleaned.length<3) return [];
 
   var base=[],co=new ClipperLib.ClipperOffset(2,0.001*scale);
-  co.AddPath(cleaned,ClipperLib.JoinType.jtRound,ClipperLib.EndType.etClosedPolygon);
+  co.AddPath(cleaned,ClipperLib.JoinType.jtMiter,ClipperLib.EndType.etClosedPolygon);
   co.Execute(base,r*scale);
   if(!base.length) return [];
 
@@ -1903,7 +1912,7 @@ function offsetLoopJS(loop, d, isOpen=false){
 
 // Detect full circle từ loop edges (port từ Ruby classify_segments)
 // Port chính xác logic Ruby: tìm start point của toolpath cho is_small loop
-function getStartPointJS(loop, offsetDist, sheetW, sheetH, preferStraight){
+function getStartPointJS(loop, offsetDist, sheetW, sheetH, preferStraight, targetOnly){
   const xs=loop.flatMap(function(e){return[e.x1,e.x2];}),
         ys=loop.flatMap(function(e){return[e.y1,e.y2];});
   const xMin=Math.min.apply(null,xs), xMax=Math.max.apply(null,xs);
@@ -1957,6 +1966,11 @@ function getStartPointJS(loop, offsetDist, sheetW, sheetH, preferStraight){
   }
 
   // Tính offset_loop rồi snap đến điểm gần entry corner nhất
+  // Ruby retains this source-bbox/manual coordinate as entry_corner and does
+  // every later selection against the final offset path. Preview can request
+  // that raw target to follow the identical route.
+  if(targetOnly) return {x:ex,y:ey};
+
   var offPts = offsetLoopJS(loop, offsetDist, false);
   if(!offPts || offPts.length < 2) return null;
 
@@ -2068,7 +2082,9 @@ function straightEntryPointJS(pts, ex, ey, minLen, backD){
   if(backD <= 0 || len <= backD*2) t = 0.5;
   else if(da <= db)                t = backD/len;
   else                             t = 1 - backD/len;
-  return { x: a.x + (b.x-a.x)*t, y: a.y + (b.y-a.y)*t };
+  // Keep the owning segment so the caller can insert this exact point instead
+  // of snapping to a neighboring vertex (same contract as Ruby).
+  return { x: a.x + (b.x-a.x)*t, y: a.y + (b.y-a.y)*t, seg: best };
 }
 
 function detectCircleJS(loop){

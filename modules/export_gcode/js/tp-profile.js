@@ -169,7 +169,9 @@ function drawToolpathProfile(ctx,vecs,tool,tx,ty,sc,dpr){
         // Khớp Ruby write_profile.
         var _isCut = (tool.layer||'').toUpperCase().replace(/[^A-Z]/g,'').indexOf('CUTTING')>=0;
         var _avoidCv = (typeof STG!=='undefined' && STG.avoid_curve === true);
-        var sp0=getStartPointJS(loop, offsetDist, tpZm.sheet.width, tpZm.sheet.height, _isCut && _avoidCv);
+        // Only choose the requested entry corner here. Avoid-curve must inspect
+        // the final Clipper/miter path below, not a separately rebuilt offset.
+        var sp0=getStartPointJS(loop, offsetDist, tpZm.sheet.width, tpZm.sheet.height, false, true);
         // Keep a manual override unchanged. Otherwise, a clear rectangle may
         // move to the nearest corner whose final cut edge is the long edge.
         var _glob0 = (typeof afvDir!=='undefined') ? afvDir : 'ccw';
@@ -177,18 +179,6 @@ function drawToolpathProfile(ctx,vecs,tool,tx,ty,sc,dpr){
         var _wantCCW0 = (_eff0==='ccw');
         if(strategy==='cut_in') _wantCCW0=!_wantCCW0;
         var _manualEntry=(typeof entryFindPoint==='function') ? entryFindPoint(loop) : null;
-        if(!_manualEntry && typeof preferLongFinalEntryJS==='function'){
-          sp0=preferLongFinalEntryJS(loop,offPts,sp0,_wantCCW0);
-        }
-        if(sp0){
-          var bestI=0, bestD=Infinity;
-          for(var oi=0;oi<offPts.length;oi++){
-            var ddx=offPts[oi].x-sp0.x, ddy=offPts[oi].y-sp0.y, dd=ddx*ddx+ddy*ddy;
-            if(dd<bestD){bestD=dd;bestI=oi;}
-          }
-          offPts=offPts.slice(bestI).concat(offPts.slice(0,bestI));
-        }
-
         // ── CHUẨN HÓA CHIỀU theo hướng hiệu lực (dao override / cài đặt chung) ──
         // Khớp Ruby (write_profile) + simulator (simApplyCutDir): cut_out theo hướng;
         // cut_in/island ngược lại. Giữ điểm đầu (điểm xuống dao). Mũi tên vẽ theo
@@ -204,9 +194,40 @@ function drawToolpathProfile(ctx,vecs,tool,tx,ty,sc,dpr){
           var _wantCCW = (_eff==='ccw');
           if(strategy==='cut_in') _wantCCW = !_wantCCW;
           if((_ar>0) !== _wantCCW){
-            var _f=offPts[0]; offPts=[_f].concat(offPts.slice(1).reverse());
+            // No entry rotation has happened yet: reverse the complete path,
+            // exactly as Ruby write_profile does.
+            offPts=offPts.slice().reverse();
           }
         }
+
+        // Select the long final edge only after direction normalization.
+        if(!_manualEntry && typeof preferLongFinalEntryJS==='function'){
+          sp0=preferLongFinalEntryJS(loop,offPts,sp0,_wantCCW0);
+        }
+
+        // Find and insert the avoid-curve entry on the actual rendered path.
+        // This mirrors Ruby's S -> following vertices -> first vertex sequence.
+        var entryOnStraight=false;
+        var _dBackEntry=(typeof STG!=='undefined' && STG.entry_backoff) ? (+STG.entry_backoff_mm||10) : 0;
+        var _minEntrySeg=Math.max(Math.abs(offsetDist)*2*3,15);
+        var _spActual=(_avoidCv && _isCut && sp0 && typeof straightEntryPointJS==='function') ?
+          straightEntryPointJS(offPts,sp0.x,sp0.y,_minEntrySeg,_dBackEntry) : null;
+        if(_spActual && Number.isInteger(_spActual.seg)){
+          var _nEntry=offPts.length, _rotEntry=[{x:_spActual.x,y:_spActual.y}];
+          for(var _ei=_spActual.seg+1;_ei<_spActual.seg+1+_nEntry;_ei++){
+            _rotEntry.push(offPts[_ei%_nEntry]);
+          }
+          offPts=_rotEntry;
+          entryOnStraight=true;
+        }else if(sp0){
+          var bestI=0, bestD=Infinity;
+          for(var oi=0;oi<offPts.length;oi++){
+            var ddx=offPts[oi].x-sp0.x, ddy=offPts[oi].y-sp0.y, dd=ddx*ddx+ddy*ddy;
+            if(dd<bestD){bestD=dd;bestI=oi;}
+          }
+          offPts=offPts.slice(bestI).concat(offPts.slice(0,bestI));
+        }
+        sp0=offPts[0];
        }
 
         // ── LÙI ĐIỂM XUỐNG DAO + CẮT CHỒNG (chỉ cuttinglines, khi bật) ──
@@ -216,7 +237,10 @@ function drawToolpathProfile(ctx,vecs,tool,tx,ty,sc,dpr){
                      (typeof afvBackOn !== 'undefined' && afvBackOn === true) &&
                      (typeof afvBackMm !== 'undefined' && afvBackMm > 0);
         if(backOn){
-          offPts = backoffStartJS(offPts, afvBackMm);          // [S', ..., S']
+          // The straight entry already includes afvBackMm. Do not back off a
+          // second time; only close the loop, matching Ruby write_profile.
+          offPts = entryOnStraight ? offPts.concat([{x:offPts[0].x,y:offPts[0].y}])
+                                   : backoffStartJS(offPts, afvBackMm); // [S', ..., S']
           offPts = offPts.concat(overlapPointsJS(offPts, tool.diameter/2));
           sp0 = offPts[0];                                     // dấu điểm xuống dao dời theo
         }

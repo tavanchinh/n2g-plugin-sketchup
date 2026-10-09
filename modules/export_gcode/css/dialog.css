@@ -195,11 +195,33 @@ select.fi{cursor:pointer}
 #tp-modal .tp-title{font-size:12px;font-weight:600;margin-bottom:3px}
 #tp-modal .tp-legend{display:flex;gap:8px;font-size:10px;align-items:center;flex-wrap:wrap;color:var(--text2)}
 #tp-modal .tp-body{flex:1;overflow:hidden;display:flex;flex-direction:column;background:var(--surface2)}
+#tp-modal .tp-workspace{flex:1;min-width:0;min-height:0;display:flex;overflow:hidden}
 #tp-modal .tp-tabs{display:flex;gap:4px;padding:8px 10px 0;flex-shrink:0;background:var(--bg);border-bottom:1px solid var(--border)}
 #tp-modal .tp-tab{padding:8px 16px;border:1px solid var(--border);border-bottom:none;border-radius:7px 7px 0 0;background:var(--surface);color:var(--text2);font-size:12px;cursor:pointer;transition:all .15s;white-space:nowrap;position:relative;top:1px}
 #tp-modal .tp-tab:hover{background:var(--surface2);color:var(--text)}
 #tp-modal .tp-tab.active{background:var(--surface2);color:var(--text);font-weight:600;border-bottom:1px solid var(--surface2)}
-#tp-modal .tp-canvas-wrap{flex:1;overflow:hidden;display:flex;align-items:center;justify-content:center;padding:10px;min-height:0}
+#tp-modal .tp-canvas-wrap{flex:1 1 100%;overflow:hidden;display:flex;align-items:center;justify-content:center;padding:10px;min-width:0;min-height:0}
+#tp-modal .tp-workspace.gcode-open .tp-canvas-wrap{flex-basis:66.666%}
+#tp-modal .tp-gcode-panel{flex:0 0 33.333%;min-width:250px;min-height:0;border-left:1px solid var(--border);background:#17191c;color:#d8dde5;display:flex;flex-direction:column;overflow:hidden}
+#tp-modal .tp-gcode-panel.hidden{display:none}
+.tp-gcode-head{height:38px;box-sizing:border-box;flex:none;display:flex;align-items:center;justify-content:space-between;gap:8px;padding:0 10px;border-bottom:1px solid #30343a;font-size:11px;font-weight:700;color:#fff}
+.tp-gcode-head-main{display:flex;align-items:center;gap:8px;white-space:nowrap}
+#tp-gcode-position{color:#8f99a6;font-size:9px;font-weight:400}
+#tp-gcode-file{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#9ca5b2;font-size:10px;font-weight:400}
+.tp-gcode-status{padding:12px;color:#9ca5b2;font:11px/1.5 var(--sans);flex:none}
+.tp-gcode-lines{flex:1;min-height:0;overflow:auto;padding:6px 0 20px;font:11px/1.55 var(--mono);scroll-behavior:smooth}
+.tp-gcode-lines:focus{outline:1px solid #526071;outline-offset:-1px}
+.tp-gcode-line{display:flex;min-height:17px;padding:0 10px;border-left:3px solid transparent;white-space:pre}
+.tp-gcode-line:hover{background:#252a30;cursor:pointer}
+.tp-gcode-line:before{content:attr(data-number);width:42px;flex:none;text-align:right;padding-right:10px;color:#68717d;user-select:none}
+.tp-gcode-line .lc{color:#cbd1da}
+.tp-gcode-line.active{background:#30461f;border-left-color:#8dc63f}
+.tp-gcode-line.active:before{color:#b8db89}
+.tp-gcode-line.active .lc{color:#fff;font-weight:600}
+.tp-gcode-state{flex:none;display:grid;grid-template-columns:1fr 1fr 1.15fr;gap:8px;padding:8px 10px;border-top:1px solid #30343a;background:#202328;font:10px/1.4 var(--mono)}
+.tp-gcode-coords,.tp-gcode-meta{display:flex;flex-direction:column;gap:4px;min-width:0}
+.tp-gcode-state label{display:flex;align-items:center;gap:4px;color:#aab2bd;min-width:0}
+.tp-gcode-state output{flex:1;min-width:0;padding:1px 5px;border:1px solid #526071;background:#111418;color:#eef3f8;text-align:right;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 #tp-modal canvas{border-radius:6px;box-shadow:0 4px 20px rgba(0,0,0,0.15);background:#fff;max-width:100%;max-height:100%}
 /* Nút Lưu thay đổi (override) — nổi bật khi có thay đổi chưa lưu.
    Cần #tp-modal để thắng độ ưu tiên của '#tp-modal .tbtn-save' (màu xanh). */

@@ -766,8 +766,13 @@ module N2G
         end
 
         dlg.add_action_callback("export_gcode_callback") do |_, config_json|
+          incoming_config = JSON.parse(config_json) rescue {}
           if @export_gcode_busy
             puts "N2G: bỏ qua yêu cầu xuất trùng khi một phiên xuất đang chạy"
+            if incoming_config["preview_only"] == true
+              rid = incoming_config["preview_request_id"].to_s
+              dlg.execute_script("n2gGcodePreviewError(#{rid.to_json}, 'busy')")
+            end
             next
           end
           @export_gcode_busy = true
@@ -784,7 +789,7 @@ module N2G
               end
             end
 
-            config = JSON.parse(config_json)
+            config = incoming_config
 
             # Catalog dao cụ (để bổ sung field thiếu cho dữ liệu cũ chưa có spindle/tool_notes)
             tool_catalog = {}
@@ -906,6 +911,39 @@ module N2G
               # Map màu→độ dày người dùng nhập tay (khi nesting thiếu độ dày)
               manual_thickness: config["manual_thickness"] || {},
             }
+
+            # Generate the preview with the production writer itself. The
+            # temporary directory is removed before the result reaches JS.
+            if config["preview_only"] == true
+              request_id = config["preview_request_id"].to_s
+              UI.start_timer(0.01, false) do
+                begin
+                  fresh_sheets = Scanner.scan_model(Sketchup.active_model, scan_tl) || []
+                  overrides = config["layer_overrides"] || {}
+                  GcodeEngine.apply_layer_overrides!(fresh_sheets, overrides, scan_tl) unless overrides.empty?
+                  payload = []
+                  Dir.mktmpdir('n2g_gcode_preview_') do |tmp_dir|
+                    generated = []
+                    PostProcessor.generate(fresh_sheets, tl, config["post"], app_settings,
+                                           tmp_dir, generated)
+                    preview_sheet = config["preview_sheet"].to_s
+                    selected = generated.select { |item| preview_sheet.empty? || item[:sheet].to_s == preview_sheet }
+                    payload = selected.map do |item|
+                      raw = File.binread(item[:path])
+                      text = raw.force_encoding('UTF-8').scrub
+                      { sheet: item[:sheet], file: File.basename(item[:path]), text: text }
+                    end
+                  end
+                  dlg.execute_script("n2gGcodePreviewReceive(#{request_id.to_json}, #{JSON.generate(payload)})")
+                rescue => pe
+                  puts "N2G G-code preview error: #{pe.message}"
+                  dlg.execute_script("n2gGcodePreviewError(#{request_id.to_json}, #{pe.message.to_json})")
+                ensure
+                  @export_gcode_busy = false
+                end
+              end
+              next
+            end
 
             # ── Chọn thư mục TRƯỚC khi scan (để hộp thoại mở NGAY, không chờ 3-5s) ──
             out_dir = UI.select_directory(title: "Chọn thư mục lưu G-code")

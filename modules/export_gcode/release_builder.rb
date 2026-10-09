@@ -107,7 +107,33 @@ module N2G
                           "Chạy 'node build_dialog.js' trước, hoặc build với gộp lại.")
             return
           end
+          newest_ui_source = ([File.join(SRC_DIR, 'dialog.html')] +
+            Dir.glob(File.join(SRC_DIR, 'js', '*.js')) +
+            Dir.glob(File.join(SRC_DIR, 'css', '*.css'))).select { |p| File.file?(p) }
+              .map { |p| File.mtime(p) }.max
+          if newest_ui_source && File.mtime(assets_rb_path) < newest_ui_source
+            UI.messagebox("dialog_assets.rb cũ hơn mã JS/CSS hiện tại.\n" \
+                          "Hãy chạy node build_dialog.js hoặc build với gộp lại để tránh UI/Ruby lệch phiên bản.")
+            return
+          end
           asset_note = "dialog_assets.rb: GIỮ bản sẵn có (không gộp lại)"
+        end
+
+        # Runtime Profile requires these payload fields. Refuse a mixed build
+        # where a new Ruby backend is packaged with an older embedded UI.
+        begin
+          load assets_rb_path
+          bundled_html = N2G::ExportGcode::DialogAssets.html
+          required_contract = %w[profile_paths js_open_offset]
+          missing_contract = required_contract.reject { |token| bundled_html.include?(token) }
+          unless missing_contract.empty?
+            UI.messagebox("dialog_assets.rb không tương thích với Ruby hiện tại.\n" \
+                          "Thiếu: #{missing_contract.join(', ')}. Hãy tạo lại assets trước khi build.")
+            return
+          end
+        rescue => e
+          UI.messagebox("Không kiểm tra được dialog_assets.rb: #{e.message}")
+          return
         end
 
         n = copy_release(dest, ver)

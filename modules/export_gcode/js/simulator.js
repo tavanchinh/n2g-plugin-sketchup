@@ -382,7 +382,9 @@ function simPushPath(seq, path, tool){
   var isCutOn = (_strat !== 'cut_out' && _strat !== 'cut_in');
   // CHỈ path KÍN mới chuẩn hóa chiều. Path HỞ (C/L/U) giữ nguyên thứ tự đầu→cuối,
   // nếu đảo sẽ hoán đổi 2 đầu vào/ra. Khớp tp-profile + Ruby.
-  if(simIsCuttingLayer(tool.layer) && pts.length>2 && !isCutOn && !!path._closed){
+  // Analytic full circles are a dedicated Ruby branch and are always emitted
+  // clockwise; do not reverse their sampled simulator points via cut_dir.
+  if(path.type!=='circle' && simIsCuttingLayer(tool.layer) && pts.length>2 && !isCutOn && !!path._closed){
     pts = simApplyCutDir(pts, _strat, tool);
   }
   // ── RAMP ENTRY: profile cuttinglines, ramp bật (theo DAO), 1 lượt, loop kín ──
@@ -448,7 +450,11 @@ function simPathCenter(p){
 function simCircleToPts(cx, cy, r, n=32){
   const pts=[];
   for(let i=0;i<=n;i++){
-    const a=(i/n)*Math.PI*2;
+    // Ruby full-circle writer always emits clockwise quadrants (and its ramp
+    // sampling also uses a negative angle). Keep the simulator in that same
+    // order so keyboard stepping grows the green trace instead of traversing
+    // the circle backwards from its closing segment.
+    const a=-(i/n)*Math.PI*2;
     pts.push({x:cx+r*Math.cos(a), y:cy+r*Math.sin(a)});
   }
   return pts;
@@ -601,6 +607,7 @@ function simPrepare(){
   simAnim.done = false;
   simAnim.totalLen = simAnim.segs.reduce((s,g)=>s+g.len,0) || 1;
   simAnim.doneLen = 0;
+  if(typeof n2gGcodePreviewBindSegments==='function') n2gGcodePreviewBindSegments(simAnim.segs);
 }
 
 function simPause(){
@@ -613,6 +620,7 @@ function simReset(){
   simPause();
   simAnim.segs=[]; simAnim.segIdx=0; simAnim.segDist=0; simAnim.done=false; simAnim.doneLen=0;
   simSetProgress(0);
+  if(typeof n2gGcodePreviewReset==='function') n2gGcodePreviewReset();
   if(typeof redrawToolpath==='function') redrawToolpath();
 }
 
@@ -652,6 +660,7 @@ function simTick(now){
   // Khi dang zoom/pan, chi giu canvas nen nhe; frame nang ve lai sau debounce 400ms.
   if(typeof tpZoomSettling==='undefined' || !tpZoomSettling) simRenderFrame();
   simSetProgress(Math.min(100, (simAnim.doneLen/simAnim.totalLen)*100));
+  if(typeof n2gGcodePreviewSetSegment==='function') n2gGcodePreviewSetSegment(simAnim.segIdx);
 
   if(simAnim.done){
     simAnim.playing=false;

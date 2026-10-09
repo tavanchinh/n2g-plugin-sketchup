@@ -506,9 +506,13 @@ function n2gBuildProfilePathsForExport(){
       var ln=(tool.layer||'').toUpperCase().replace(/[^A-Z0-9]/g,'');
       return tool.type==='profile' && !(tool.bit_type==='vbit' && tool.strategy==='cut_in') && ln!=='ABFMARKSQUARE';
     }).forEach(function(tool){
+      var toolLayerNorm=(tool.layer||'').toUpperCase().replace(/[^A-Z0-9]/g,'');
+      var matchedLayerNames={};
       var vecs=(sheet.display||[]).filter(function(v){
         var eff=(typeof editEffectiveLayer==='function') ? editEffectiveLayer(v,sheet.name) : v.layer;
-        return eff===tool.layer && !v.is_drill_center && Math.hypot(v.x2-v.x1,v.y2-v.y1)>0.1;
+        var sameLayer=(eff||'').toUpperCase().replace(/[^A-Z0-9]/g,'')===toolLayerNorm;
+        if(sameLayer) matchedLayerNames[String(eff||tool.layer)]=true;
+        return sameLayer && !v.is_drill_center && Math.hypot(v.x2-v.x1,v.y2-v.y1)>0.1;
       });
       if(!vecs.length) return;
       var loops=buildProfileLoopsJS(vecs);
@@ -639,7 +643,16 @@ function n2gBuildProfilePathsForExport(){
           mode:mode,runs:(mode==='clipper'||mode==='js_offset'||mode==='js_open_offset')?runs:[],
           closed:!!loop._closed,island:!!islands[li],source_edges:sourceEdges});
       });
-      if(records.length) out[sheet.name+'::'+tool.layer]=records;
+      if(records.length){
+        // Ruby resolves tool jobs by normalized layer name, so publish the same
+        // manifest under both the configured name and every effective vector
+        // layer spelling. This avoids an empty Profile payload caused only by
+        // case, spaces, underscores or an edit-layer override.
+        matchedLayerNames[String(tool.layer)]=true;
+        Object.keys(matchedLayerNames).forEach(function(layerName){
+          out[sheet.name+'::'+layerName]=records;
+        });
+      }
     });
   });
   return out;
@@ -647,6 +660,30 @@ function n2gBuildProfilePathsForExport(){
 
 var _n2gPocketExportWarnings=[];
 var _n2gProfileExportWarnings=[];
+
+// Single payload builder shared by final export and the temporary Ruby preview.
+// Keeping one source prevents the G-code viewer from using different settings.
+function n2gBuildExportPayload(pocketPaths,profilePaths){
+  return {
+    tools:TOOLS,settings:STG,cut_order:CUSTOM_CUT_ORDER,
+    layer_overrides:(typeof LAYER_OVERRIDES!=='undefined')?LAYER_OVERRIDES:{},
+    entry_overrides:(typeof ENTRY_OVERRIDES!=='undefined')?ENTRY_OVERRIDES:{},
+    pocket_paths:pocketPaths||{},profile_engine:'clipper',profile_paths:profilePaths||{},
+    manual_thickness:MANUAL_THICKNESS,
+    save_history:(typeof N2G_SAVE_HISTORY!=='undefined')?N2G_SAVE_HISTORY:true,
+    tool_group_name:n2gSelectedText('ec-tool-preset'),
+    post:{
+      name:n2gSelectedText('ec-post-preset'),unit:document.getElementById('pp-unit').value,
+      safe_z:+document.getElementById('pp-safez').value,clear_z:+document.getElementById('pp-clearz').value,
+      ext:document.getElementById('pp-ext').value,comment:document.getElementById('pp-comment').value,
+      spindle_on:document.getElementById('pp-spindle-on').value,
+      spindle_off:document.getElementById('pp-spindle-off').value,
+      cool_on:document.getElementById('pp-cool-on').value,cool_off:document.getElementById('pp-cool-off').value,
+      toolchange:(document.getElementById('pp-toolchange')||{value:''}).value||'',
+      header:document.getElementById('pp-header').value,footer:document.getElementById('pp-footer').value
+    }
+  };
+}
 
 async function _doExportSend(){
   flushAll();
@@ -700,34 +737,7 @@ async function _doExportSend(){
     if(ov) ov.style.display='flex';
   }
   sketchup.save_layer_map_callback(JSON.stringify(TOOLS));
-  sketchup.export_gcode_callback(JSON.stringify({
-    tools: TOOLS,
-    settings: STG,
-    cut_order: CUSTOM_CUT_ORDER,
-    layer_overrides: (typeof LAYER_OVERRIDES !== 'undefined') ? LAYER_OVERRIDES : {},
-    entry_overrides: (typeof ENTRY_OVERRIDES !== 'undefined') ? ENTRY_OVERRIDES : {},
-    pocket_paths: pocketPaths,
-    profile_engine: profileEngine,
-    profile_paths: profilePaths,
-    manual_thickness: MANUAL_THICKNESS,
-    save_history: (typeof N2G_SAVE_HISTORY !== 'undefined') ? N2G_SAVE_HISTORY : true,
-    tool_group_name: n2gSelectedText('ec-tool-preset'),
-    post:{
-      name:        n2gSelectedText('ec-post-preset'),
-      unit:        document.getElementById('pp-unit').value,
-      safe_z:      +document.getElementById('pp-safez').value,
-      clear_z:     +document.getElementById('pp-clearz').value,
-      ext:         document.getElementById('pp-ext').value,
-      comment:     document.getElementById('pp-comment').value,
-      spindle_on:  document.getElementById('pp-spindle-on').value,
-      spindle_off: document.getElementById('pp-spindle-off').value,
-      cool_on:     document.getElementById('pp-cool-on').value,
-      cool_off:    document.getElementById('pp-cool-off').value,
-      toolchange:  (document.getElementById('pp-toolchange')||{value:''}).value || '',
-      header:      document.getElementById('pp-header').value,
-      footer:      document.getElementById('pp-footer').value,
-    }
-  }));
+  sketchup.export_gcode_callback(JSON.stringify(n2gBuildExportPayload(pocketPaths,profilePaths)));
 }
 
 // Ruby báo: đã chọn folder, đang scan + sinh G-code → đổi chữ overlay

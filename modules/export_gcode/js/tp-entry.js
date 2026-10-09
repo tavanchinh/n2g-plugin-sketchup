@@ -204,6 +204,8 @@ var OV_DIRTY = false;   // có thay đổi chưa lưu?
 // Đánh dấu có thay đổi chưa lưu → nút Lưu đổi trạng thái
 function ovMarkDirty(){
   OV_DIRTY = true;
+  // Geometry/order changed: never present an old temporary NC as current.
+  if(typeof n2gGcodePreviewInvalidate==='function') n2gGcodePreviewInvalidate();
   var b=document.getElementById('tp-save-ov');
   if(b){ b.classList.add('ov-dirty'); b.textContent='💾 Lưu thay đổi *'; }
 }

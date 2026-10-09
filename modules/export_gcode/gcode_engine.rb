@@ -2756,7 +2756,8 @@ module N2G
       # off_pts: mảng {x,y} loop kín (điểm cuối KHÔNG lặp điểm đầu).
       # z_top: Z mặt ván (nơi dao chạm phôi). z_bottom: Z đáy cắt. Ramp đi chéo từ
       # z_top xuống z_bottom dọc L mm đầu.
-      def self.ramp_entry_lines(off_pts, z_bottom, z_top, ramp_len, z_feed, feed, arc_min_r: nil)
+      def self.ramp_entry_lines(off_pts, z_bottom, z_top, ramp_len, z_feed, feed,
+                                arc_min_r: nil, exact_circle: nil)
         n = off_pts.size
         return nil if n < 2
         seg = []; total = 0.0
@@ -2791,6 +2792,21 @@ module N2G
         end
         walk = walk.select { |w| w[:cum] <= target + 1e-6 }
 
+        # Các mốc l_eff/target có thể được chèn giữa hai điểm mẫu nên ban đầu nằm
+        # trên dây cung. Với full-circle chính xác, chiếu chúng trở lại đúng bán kính
+        # để G1 cuối ramp nối liên tục và đồng tâm với cung G02/G03 ở Z đáy.
+        if exact_circle && exact_circle[:r].to_f > 1e-9
+          cx = exact_circle[:cx].to_f; cy = exact_circle[:cy].to_f
+          radius = exact_circle[:r].to_f
+          walk.each do |w|
+            vx = w[:x].to_f - cx; vy = w[:y].to_f - cy
+            vl = Math.hypot(vx, vy)
+            next if vl < 1e-9
+            w[:x] = cx + vx * radius / vl
+            w[:y] = cy + vy * radius / vl
+          end
+        end
+
         # Dao đang ở trên cao (clear_z) tại off_pts[0]. Hạ nhanh tới MẶT VÁN (z_top),
         # rồi G1 chéo xuống z_bottom dọc L mm đầu.
         out = ["G0 Z#{format('%.3f', z_top)}"]
@@ -2813,6 +2829,29 @@ module N2G
         end
 
         bottom = walk[ramp_end..] || []
+
+        # Với full-circle đã được nhận diện chính xác, phần từ mốc đạt Z đáy trở đi
+        # luôn dài đúng một chu vi. Giữ đoạn đang hạ Z là G1 để tương thích controller,
+        # nhưng xuất vòng cắt tại Z đáy bằng 4 cung 90 độ thay vì 72 đoạn G1.
+        # Điểm bắt đầu lấy trực tiếp từ cuối ramp để không tạo bước nhảy XY.
+        if exact_circle && bottom.size >= 2
+          start = bottom[0]
+          cx = exact_circle[:cx].to_f; cy = exact_circle[:cy].to_f
+          rx = start[:x].to_f - cx; ry = start[:y].to_f - cy
+          if Math.hypot(rx, ry) > 1e-9
+            cw = exact_circle.fetch(:cw, true) == true
+            cmd = cw ? 'G02' : 'G03'
+            4.times do
+              nrx, nry = cw ? [ry, -rx] : [-ry, rx]
+              ex = cx + nrx; ey = cy + nry
+              out << "#{cmd} X#{format('%.3f',ex)} Y#{format('%.3f',ey)} " \
+                     "I#{format('%.3f',-rx)} J#{format('%.3f',-ry)}#{feed_word.call}"
+              rx = nrx; ry = nry
+            end
+            return out
+          end
+        end
+
         arc_at = {}
         if arc_min_r && bottom.size >= 2
           detect_arcs_gcode(bottom, arc_min_r.to_f).each { |a| arc_at[a[:s]] = a }
@@ -2928,6 +2967,21 @@ module N2G
         [gid, xs.min.to_f, xs.max.to_f, ys.min.to_f, ys.max.to_f]
       end
 
+      def self.profile_records_for(all_paths, sheet_name, layer_name)
+        return nil unless all_paths.is_a?(Hash)
+        exact_key = "#{sheet_name}::#{layer_name}"
+        exact = all_paths[exact_key] || all_paths[exact_key.to_sym]
+        return exact if exact.is_a?(Array)
+        wanted_layer = layer_name.to_s.upcase.gsub(/[^A-Z0-9]/, '')
+        pair = all_paths.find do |key, value|
+          next false unless value.is_a?(Array)
+          sheet_part, layer_part = key.to_s.split('::', 2)
+          sheet_part == sheet_name.to_s &&
+            layer_part.to_s.upcase.gsub(/[^A-Z0-9]/, '') == wanted_layer
+        end
+        pair && pair[1]
+      end
+
       def self.write_profile(f, lines, cfg, clear_z, sheet_w=9999, sheet_h=9999, app_settings={})
         comment_style = cfg[:comment_style] || app_settings[:comment_style] || 'off'
         raw = lines.reject { |l| l[:is_drill_center] }
@@ -2939,9 +2993,8 @@ module N2G
         raw_loops = nil
         if app_settings[:profile_engine].to_s == 'clipper'
           manifest_layer = (app_settings[:layer_name] || cfg[:layer]).to_s
-          manifest_key = "#{app_settings[:sheet_name]}::#{manifest_layer}"
           all_manifest = app_settings[:profile_paths] || {}
-          manifest_records = all_manifest[manifest_key] || all_manifest[manifest_key.to_s]
+          manifest_records = profile_records_for(all_manifest, app_settings[:sheet_name], manifest_layer)
           if manifest_records.is_a?(Array) && manifest_records.any? &&
              manifest_records.all? { |rec| (rec['source_edges'] || rec[:source_edges]).is_a?(Array) }
             raw_loops = manifest_records.map do |rec|
@@ -3042,9 +3095,8 @@ module N2G
         # phía dưới (entry, ramp, multipass, Safe Z, arc...) vẫn được giữ nguyên.
         if app_settings[:profile_engine].to_s == 'clipper'
           profile_layer = (app_settings[:layer_name] || cfg[:layer]).to_s
-          profile_key = "#{sheet_name}::#{profile_layer}"
           all_profile_paths = app_settings[:profile_paths] || {}
-          records = all_profile_paths[profile_key] || all_profile_paths[profile_key.to_s] || []
+          records = profile_records_for(all_profile_paths, sheet_name, profile_layer) || []
           used_records = {}
           expanded_loops = []
           sorted_loops.each_with_index do |lp, si|
@@ -3294,8 +3346,15 @@ module N2G
               prev_z = (effective_cfg[:z_top] || 0.0).to_f
               levels.each do |zl|
                 f.puts "G0 X#{format('%.3f',ramp_pts[0][:x])} Y#{format('%.3f',ramp_pts[0][:y])}"
+                exact_ramp_circle = if closed_on && is_cutting_layer &&
+                                       app_settings.fetch(:arc_interp, false) == true &&
+                                       segments.size == 1 && segments[0][:type] == :full_circle
+                                      { cx:segments[0][:cx], cy:segments[0][:cy],
+                                        r:segments[0][:r], cw:true }
+                                    end
                 rl = closed_on ?
-                     ramp_entry_lines(ramp_pts, zl.to_f, prev_z, ramp_len, z_feed, feed) :
+                     ramp_entry_lines(ramp_pts, zl.to_f, prev_z, ramp_len, z_feed, feed,
+                                      exact_circle: exact_ramp_circle) :
                      ramp_open_entry_lines(ramp_pts, zl.to_f, prev_z, ramp_len, z_feed, feed)
                 rl.to_a.each { |line| f.puts line }
                 f.puts "G0 Z#{format('%.1f',clear_z)}"
@@ -3522,7 +3581,14 @@ module N2G
                 prev_z = (effective_cfg[:z_top] || 0.0).to_f
                 levels.each do |zl|
                   f.puts "G0 X#{format('%.3f',start_x)} Y#{format('%.3f',start_y)}"
-                  ramp_entry_lines(circle_pts, zl.to_f, prev_z, ramp_len, z_feed, feed).to_a.each { |l| f.puts l }
+                  exact_ramp_circle = if is_cutting_layer &&
+                                         app_settings.fetch(:arc_interp, false) == true
+                                        { cx:seg[:cx], cy:seg[:cy], r:r_new, cw:true }
+                                      end
+                  ramp_entry_lines(
+                    circle_pts, zl.to_f, prev_z, ramp_len, z_feed, feed,
+                    exact_circle: exact_ramp_circle
+                  ).to_a.each { |l| f.puts l }
                   f.puts "G0 Z#{format('%.1f',clear_z)}"
                   prev_z = zl.to_f
                 end

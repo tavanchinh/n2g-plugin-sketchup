@@ -1,5 +1,6 @@
 require 'json'
 require 'fileutils'
+require 'tmpdir'
 
 # ==============================================================================
 # N2G / modules / export_gcode / main.rb

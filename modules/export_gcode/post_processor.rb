@@ -198,8 +198,7 @@ module N2G
             layer_norm = layer.to_s.upcase.gsub(/[^A-Z0-9]/, '')
             next if layer_norm == 'ABFMARKSQUARE'
             next if cfg[:bit_type].to_s == 'vbit' && cfg[:strategy].to_s == 'cut_in'
-            key = "#{sheet[:name]}::#{layer}"
-            records = profile_paths.is_a?(Hash) ? (profile_paths[key] || profile_paths[key.to_s]) : nil
+            records = GcodeEngine.profile_records_for(profile_paths, sheet[:name], layer)
             unless records.is_a?(Array) && !records.empty?
               # Circle, open path and cut_on use existing Profile branches and
               # never consume a JS/Clipper offset. Require serialized JS data
@@ -224,7 +223,7 @@ module N2G
         end
       end
 
-      def self.generate(all_sheets, tool_library, post, app_settings={}, preselected_folder=nil)
+      def self.generate(all_sheets, tool_library, post, app_settings={}, preselected_folder=nil, generated_files=nil)
         return nil unless validate_pocket_paths!(all_sheets, tool_library, app_settings)
         validate_profile_paths!(all_sheets, tool_library, app_settings)
 
@@ -539,6 +538,7 @@ module N2G
               "safe_z"      => safe_z,
               "unclamp"     => unclamp_val)
           end
+          generated_files << { sheet: sheet[:name].to_s, path: file_path } if generated_files.is_a?(Array)
         end
 
         # Trả về thư mục gốc để dialog hiển thị thông báo kèm nút "Mở thư mục"

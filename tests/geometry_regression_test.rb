@@ -72,6 +72,13 @@ class GeometryRegressionTest < Minitest::Test
     refute_includes second, 'F12000'
   end
 
+  def test_profile_manifest_layer_lookup_matches_ruby_normalization
+    records = [{mode:'clipper'}]
+    paths = {'18mm-sheet-1::abf cutting-lines' => records}
+    assert_same records,G.profile_records_for(paths,'18mm-sheet-1','ABF_CUTTINGLINES')
+    assert_nil G.profile_records_for(paths,'18mm-sheet-2','ABF_CUTTINGLINES')
+  end
+
   def profile_cfg(strategy, extra = {})
     { strategy: strategy, diameter: 6.0, depth: -6.0, feed: 12_000,
       z_feed: 2_000, layer: 'ABF_CUTTINGLINES', comment_style: '( ... )' }.merge(extra)

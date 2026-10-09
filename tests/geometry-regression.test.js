@@ -5,7 +5,8 @@ const fs = require('fs');
 const vm = require('vm');
 const path = require('path');
 
-const context = { console, Math };
+const ClipperLib = require(path.join(__dirname, '..', 'modules', 'export_gcode', 'js', 'clipper-lib.js'));
+const context = { console, Math, ClipperLib };
 vm.createContext(context);
 const geometry = fs.readFileSync(
   path.join(__dirname, '..', 'modules', 'export_gcode', 'js', 'cam-geometry.js'),
@@ -84,5 +85,41 @@ assertFiniteBoundedOffset(
   context.profileExactCutOutOffsetJS(narrowConcave,3), narrowConcave,12.001,
   'narrow concave CUT_OUT'
 );
+
+function cornerMicroRecess(radius) {
+  const angles = [8,7,6,5,4].map(k => Math.PI*k/8);
+  return polygonEdges([[0,0]].concat(
+    angles.map(a => [100+radius*Math.cos(a),radius*Math.sin(a)]),
+    [[100,100],[0,100]]
+  ),91);
+}
+
+const microRecess = cornerMicroRecess(2.5);
+microRecess._closed = true;
+assert(context.profileHasMicroDetourJS(microRecess,6),
+  'D5 sampled recess must route through micro-envelope for a D6 cutter');
+const microRuns = context.profileOffsetClipper(microRecess,3,'cut_out');
+assert(microRuns.length>0,'micro-envelope must produce a CUT_OUT run');
+microRuns.forEach(run => assert(context.profileLocalMicroEnvelopeSafeJS(microRecess,run),
+  'micro-envelope must contain the source without crossing material or itself'));
+assert(microRuns.every(run => run.length<100),
+  'validated Clipper route should be preferred over the verbose full envelope');
+[[103,103],[-3,103],[-3,-3]].forEach(expected => assert(
+  microRuns[0].some(p => Math.hypot(p.x-expected[0],p.y-expected[1])<0.002),
+  `ordinary 90-degree corner must remain sharp at ${expected}`
+));
+
+const ordinaryRectangle = polygonEdges([[0,0],[100,0],[100,100],[0,100]],92);
+assert.strictEqual(context.profileHasMicroDetourJS(ordinaryRectangle,6),false,
+  'ordinary rectangle must retain the exact CUT_OUT engine');
+
+// Avoid-curve must identify the exact owning segment so Preview can insert the
+// same interior entry point as Ruby instead of snapping to a nearby vertex.
+const entryPath = [{x:0,y:0},{x:100,y:0},{x:100,y:10},{x:0,y:10}];
+const straightEntry = context.straightEntryPointJS(entryPath,50,10,15,10);
+assert(straightEntry && straightEntry.seg === 2,
+  'straight entry must retain its owning segment index');
+assert(Math.abs(straightEntry.y-10) < 1e-9 && straightEntry.x > 0 && straightEntry.x < 100,
+  'straight entry must stay inside the selected final offset segment');
 
 console.log('JS geometry regression: OK');

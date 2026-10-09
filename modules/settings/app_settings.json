@@ -42,14 +42,14 @@
   "cut_dir": "ccw",
   "afv_sel": {
     "left": 1,
-    "right": 3,
+    "right": 2,
     "top": 2,
     "bottom": 0
   },
   "avoid_curve": false,
   "ramp_on": true,
   "ramp_len": 20,
-  "arc_interp": false,
+  "arc_interp": true,
   "arc_min_r": 60,
   "long_final_edge": true,
   "sharp_outside_corner": true,

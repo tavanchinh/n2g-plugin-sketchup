@@ -84,8 +84,37 @@
         <button id="tp-mode-path" class="tp-tab" onclick="setDetailMode('toolpath')">▶ Xem đường dao</button>
         <button id="tp-mode-edit" class="tp-tab" onclick="setDetailMode('edit')">✏ Chỉnh sửa</button>
       </div>
-      <div class="tp-canvas-wrap">
-        <canvas id="tp-canvas"></canvas>
+      <div class="tp-workspace">
+        <div class="tp-canvas-wrap">
+          <canvas id="tp-canvas"></canvas>
+        </div>
+        <section id="tp-gcode-panel" class="tp-gcode-panel hidden" aria-label="G-code xem trước">
+          <div class="tp-gcode-head">
+            <span class="tp-gcode-head-main">
+              <span>G-code thực tế</span>
+              <span id="tp-gcode-position">Dòng — / —</span>
+            </span>
+            <span id="tp-gcode-file"></span>
+          </div>
+          <div id="tp-gcode-status" class="tp-gcode-status">Chưa tạo bản xem trước</div>
+          <div id="tp-gcode-lines" class="tp-gcode-lines" tabindex="0" onkeydown="n2gGcodePreviewKeydown(event)" title="Dùng phím mũi tên lên/xuống để chuyển dòng"></div>
+          <div class="tp-gcode-state" id="tp-gcode-state">
+            <div class="tp-gcode-coords">
+              <label>X:<output id="tp-gcode-x">—</output></label>
+              <label>Y:<output id="tp-gcode-y">—</output></label>
+              <label>Z:<output id="tp-gcode-z">—</output></label>
+            </div>
+            <div class="tp-gcode-coords">
+              <label>I:<output id="tp-gcode-i">—</output></label>
+              <label>J:<output id="tp-gcode-j">—</output></label>
+              <label>K:<output id="tp-gcode-k">—</output></label>
+            </div>
+            <div class="tp-gcode-meta">
+              <label>Tool:<output id="tp-gcode-tool">—</output></label>
+              <label>Feed:<output id="tp-gcode-feed">—</output></label>
+            </div>
+          </div>
+        </section>
       </div>
     </div>
     <!-- Sidebar phải: danh sách thứ tự cắt (chế độ order) -->
@@ -1008,6 +1037,7 @@ window.renderSheets = function(){
 <script src="js/tp-dispatch.js"></script>
 <script src="js/tp-entry.js"></script>
 <script src="js/tp-edit.js"></script>
+<script src="js/gcode-preview.js"></script>
 <script src="js/simulator.js"></script>
 <script src="js/export.js"></script>
 <script src="js/history.js"></script>

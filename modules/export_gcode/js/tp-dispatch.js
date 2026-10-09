@@ -6,6 +6,27 @@
 var tpZm = tpZm || {scale:1,ox:0,oy:0,drag:false,lx:0,ly:0,sheet:null};
 var detailMode = detailMode || 'order';  // 'order' = thứ tự cắt | 'toolpath' = xem đường dao | 'edit' = chỉnh sửa
 
+// Giữ tấm nằm giữa khi vừa mở/nhỏ hơn viewport. Khi đã zoom lớn, chỉ cho pan
+// tới mép tấm, không cho kéo quá tay làm lộ khoảng trống và mất preview.
+function tpClampViewport(){
+  if(!tpZm||!tpZm.sheet||!tpZm.cw||!tpZm.ch)return;
+  var PAD=20,s=tpZm.sheet;
+  var availW=Math.max(1,tpZm.cw-PAD*2),availH=Math.max(1,tpZm.ch-PAD*2);
+  var baseSc=Math.min(availW/Math.max(1e-9,s.width),availH/Math.max(1e-9,s.height));
+  tpZm.scale=Math.max(0.05,Math.min(80,Number(tpZm.scale)||1));
+  var drawW=s.width*baseSc*tpZm.scale,drawH=s.height*baseSc*tpZm.scale;
+  if(drawW<=availW){
+    tpZm.ox=(tpZm.cw-drawW)/2-PAD;
+  }else{
+    tpZm.ox=Math.max(availW-drawW,Math.min(0,Number(tpZm.ox)||0));
+  }
+  if(drawH<=availH){
+    tpZm.oy=PAD-(tpZm.ch-drawH)/2;
+  }else{
+    tpZm.oy=Math.max(0,Math.min(drawH-availH,Number(tpZm.oy)||0));
+  }
+}
+
 // Chuyển chế độ modal Chi tiết (loại trừ nhau)
 function setDetailMode(mode){
   detailMode=mode;
@@ -25,6 +46,11 @@ function setDetailMode(mode){
   // sidebar chỉnh sửa chỉ hiện ở chế độ edit
   var editR=document.getElementById('edit-side-right');
   if(editR) editR.classList.toggle('hidden', mode!=='edit');
+  var gcodePanel=document.getElementById('tp-gcode-panel');
+  var workspace=document.querySelector('#tp-modal .tp-workspace');
+  if(gcodePanel) gcodePanel.classList.toggle('hidden',mode!=='toolpath');
+  if(workspace) workspace.classList.toggle('gcode-open',mode==='toolpath');
+  setTimeout(tpResizeDetailCanvas,0);
   // chú thích màu chỉ cần ở chế độ xem đường dao
   if(legend) legend.style.visibility = (mode==='toolpath') ? 'visible' : 'hidden';
   if(mode==='order' && typeof tpUpdateOrderList==='function') tpUpdateOrderList();
@@ -38,6 +64,7 @@ function setDetailMode(mode){
   // Điểm xuống dao (chỉ ở chế độ xem đường dao)
   if(mode==='toolpath'){
     if(typeof entryRefreshList==='function') setTimeout(entryRefreshList, 0);
+    if(typeof n2gGcodePreviewEnsure==='function') setTimeout(n2gGcodePreviewEnsure,0);
   } else if(typeof entrySelLoop!=='undefined'){
     entrySelLoop = -1;
   }
@@ -49,6 +76,20 @@ function setDetailMode(mode){
       if(typeof editRefreshOverrideList==='function') editRefreshOverrideList();
     }, 0);
   }
+}
+
+// Resize only the canvas buffer after the optional G-code pane changes width.
+// Geometry, zoom and simulator state remain untouched.
+function tpResizeDetailCanvas(){
+  var modal=document.getElementById('tp-modal'),cv=document.getElementById('tp-canvas');
+  var body=modal&&modal.querySelector('.tp-canvas-wrap');
+  if(!modal||!modal.classList.contains('show')||!body||!cv)return;
+  var dpr=window.devicePixelRatio||1,bw=Math.max(1,body.clientWidth-20),bh=Math.max(1,body.clientHeight-20);
+  cv.width=bw*dpr;cv.height=bh*dpr;cv.style.width=bw+'px';cv.style.height=bh+'px';
+  tpZm.cw=bw;tpZm.ch=bh;
+  tpClampViewport();
+  if(typeof simRedrawOrToolpath==='function')simRedrawOrToolpath();
+  else if(typeof redrawToolpath==='function')redrawToolpath();
 }
 
 // Dựng danh sách tấm bên trái sidebar (phương án B)
@@ -176,6 +217,7 @@ function openToolpathModal(sheet){
   cv.width=bw*dpr; cv.height=bh*dpr;
   cv.style.width=bw+'px'; cv.style.height=bh+'px';
   tpZm.cw=bw; tpZm.ch=bh;
+  tpClampViewport();
   // Loops cho thứ tự cắt: CHỈ lấy vector của layer cuttinglines (tấm phôi cắt rời).
   // Không gom mọi vector — số thứ tự chỉ áp dụng cho tấm cut_out của cuttinglines.
   var cuttingVecs = (sheet.display||[]).filter(function(v){
@@ -202,6 +244,7 @@ function openToolpathModal(sheet){
     tpZm.ox=mx-PAD-(mx-PAD-tpZm.ox)*f;
     tpZm.oy=my-tpZm.ch+PAD+(tpZm.ch-my-PAD+tpZm.oy)*f;
     tpZm.scale*=f;
+    tpClampViewport();
     tpRedrawAfterViewportChange();
   };
   // Nút chuột: 0=trái, 1=giữa, 2=phải. Pan = chuột GIỮA.
@@ -241,6 +284,7 @@ function openToolpathModal(sheet){
     if(tpZm.panning){
       tpZm.ox+=e.clientX-tpZm.lx; tpZm.oy+=e.clientY-tpZm.ly;
       tpZm.lx=e.clientX; tpZm.ly=e.clientY;
+      tpClampViewport();
       tpRedrawAfterViewportChange();
       return;
     }
@@ -262,7 +306,7 @@ function openToolpathModal(sheet){
     if(tpZm.drag && detailMode!=='edit' && detailMode!=='order'){
       if(Math.abs(e.clientX-tpZm.downX)>3||Math.abs(e.clientY-tpZm.downY)>3) tpZm.moved=true;
       tpZm.ox+=e.clientX-tpZm.lx; tpZm.oy+=e.clientY-tpZm.ly;
-      tpZm.lx=e.clientX;tpZm.ly=e.clientY;tpRedrawAfterViewportChange();
+      tpZm.lx=e.clientX;tpZm.ly=e.clientY;tpClampViewport();tpRedrawAfterViewportChange();
       hideToolpathTooltip(); return;
     }
     // Tính tọa độ canvas → model (cho tooltip)
