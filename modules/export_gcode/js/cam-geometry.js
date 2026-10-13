@@ -766,12 +766,12 @@ function profileOffsetClipper(loop, halfD, strategy){
     // resulting contour passes containment and self-intersection checks.
     if(profileHasMicroDetourJS(loop,Math.abs(halfD)*2)){
       var envelope=profileSafeCutOutClipperJS(loop,Math.abs(halfD));
-      if(envelope.length) return envelope;
+      if(envelope.length) return profileRestoreExactWidthSlotsJS(loop,envelope,Math.abs(halfD));
     }
     if(exact.length<3) profileSkipDebugJS('offset_output','exact_cut_out_empty',loop,halfD,strategy,{
       output_point_count:exact.length,output_points:exact
     });
-    return exact.length>=3?[exact]:[];
+    return exact.length>=3?profileRestoreExactWidthSlotsJS(loop,[exact],Math.abs(halfD)):[];
   }
   var scale=1000;
   var work=loop.filter(function(e){return Math.hypot(e.x2-e.x1,e.y2-e.y1)>1e-6;});
@@ -856,6 +856,113 @@ function profileHasMicroDetourJS(loop,toolD){
     if(turn1>0.15||turn2>0.15) return true;
   }
   return false;
+}
+
+// Clipper biểu diễn offset bằng polygon nên một rãnh chữ U rộng đúng bằng đường
+// kính dao sẽ co thành đường có diện tích 0 và bị loại. Phục hồi trường hợp biên
+// đó thành một nhánh tâm dao đi vào rồi quay ra trùng đúng cùng một đường.
+// Chỉ nhận rãnh vuông nghiêm ngặt: hai vách đối song song, đáy vuông góc, cả hai
+// góc đáy lõm và chiều rộng gần bằng D. Rãnh nhỏ hơn D vẫn bị envelope chặn.
+function profileRestoreExactWidthSlotsJS(loop,runs,halfD){
+  if(!loop||loop.length<5||!runs||!runs.length||!(halfD>0))return runs||[];
+  // Chỉ coi là "bằng dao" trong sai số số học 0.002 mm. Không nới theo phần
+  // trăm đường kính vì một rãnh thực sự nhỏ hơn dao tuyệt đối không được phục hồi.
+  var toolD=2*Math.abs(halfD),widthTol=0.002;
+  var angleTol=0.015,area=0;
+  loop.forEach(function(e){area+=(+e.x1)*(+e.y2)-(+e.x2)*(+e.y1);});
+  var side=area>=0?1:-1;
+
+  // SketchUp có thể chia một vách thẳng thành nhiều segment. Gom chúng thành
+  // cạnh logic trước khi tìm bộ ba vách–đáy–vách; không thay đổi loop gốc.
+  var logical=[];
+  loop.forEach(function(e){
+    var cur={x1:+e.x1,y1:+e.y1,x2:+e.x2,y2:+e.y2};
+    var len=Math.hypot(cur.x2-cur.x1,cur.y2-cur.y1);if(len<1e-8)return;
+    var prev=logical[logical.length-1];
+    if(prev){
+      var adx=prev.x2-prev.x1,ady=prev.y2-prev.y1,al=Math.hypot(adx,ady);
+      var bdx=cur.x2-cur.x1,bdy=cur.y2-cur.y1,bl=Math.hypot(bdx,bdy);
+      var gap=Math.hypot(prev.x2-cur.x1,prev.y2-cur.y1);
+      var dot=(adx*bdx+ady*bdy)/(al*bl),cross=Math.abs(adx*bdy-ady*bdx)/(al*bl);
+      if(gap<=0.05&&dot>0.9999&&cross<0.01){prev.x2=cur.x2;prev.y2=cur.y2;return;}
+    }
+    logical.push(cur);
+  });
+  if(logical.length>2){
+    var first=logical[0],last=logical[logical.length-1];
+    var fdx=first.x2-first.x1,fdy=first.y2-first.y1,fl=Math.hypot(fdx,fdy);
+    var ldx=last.x2-last.x1,ldy=last.y2-last.y1,ll=Math.hypot(ldx,ldy);
+    var wrapGap=Math.hypot(last.x2-first.x1,last.y2-first.y1);
+    if(wrapGap<=0.05&&(fdx*ldx+fdy*ldy)/(fl*ll)>0.9999&&
+       Math.abs(fdx*ldy-fdy*ldx)/(fl*ll)<0.01){
+      first.x1=last.x1;first.y1=last.y1;logical.pop();
+    }
+  }
+  var n=logical.length;
+
+  function unit(e){
+    var dx=(+e.x2)-(+e.x1),dy=(+e.y2)-(+e.y1),len=Math.hypot(dx,dy);
+    return len>1e-8?{x:dx/len,y:dy/len,len:len}:null;
+  }
+  function projectToRun(run,p){
+    var best=null;
+    for(var i=0;i<run.length;i++){
+      var a=run[i],b=run[(i+1)%run.length],dx=b.x-a.x,dy=b.y-a.y,l2=dx*dx+dy*dy;
+      if(l2<1e-12)continue;
+      var t=Math.max(0,Math.min(1,((p.x-a.x)*dx+(p.y-a.y)*dy)/l2));
+      var q={x:a.x+t*dx,y:a.y+t*dy},dd=(q.x-p.x)*(q.x-p.x)+(q.y-p.y)*(q.y-p.y);
+      if(!best||dd<best.dd)best={seg:i,p:q,dd:dd};
+    }
+    return best;
+  }
+
+  var slots=[];
+  for(var i=0;i<n;i++){
+    var e0=logical[i],cap=logical[(i+1)%n],e2=logical[(i+2)%n];
+    var u0=unit(e0),uc=unit(cap),u2=unit(e2);
+    if(!u0||!uc||!u2)continue;
+    if(Math.abs(cap.x1-e0.x2)>1e-5||Math.abs(cap.y1-e0.y2)>1e-5||
+       Math.abs(e2.x1-cap.x2)>1e-5||Math.abs(e2.y1-cap.y2)>1e-5)continue;
+    var wallDot=u0.x*u2.x+u0.y*u2.y;
+    var perp0=Math.abs(u0.x*uc.x+u0.y*uc.y),perp2=Math.abs(u2.x*uc.x+u2.y*uc.y);
+    if(wallDot>-1+angleTol||perp0>angleTol||perp2>angleTol)continue;
+    var cross1=(u0.x*uc.y-u0.y*uc.x)*side;
+    var cross2=(uc.x*u2.y-uc.y*u2.x)*side;
+    var localDepth=Math.min(u0.len,u2.len);
+    if(Math.abs(uc.len-toolD)>widthTol)continue;
+    if(cross1>=-angleTol||cross2>=-angleTol)continue;
+    var capMid={x:((+cap.x1)+(+cap.x2))/2,y:((+cap.y1)+(+cap.y2))/2};
+    // Một vách có thể tiếp tục thành cạnh dài của chi tiết. Miệng cục bộ của
+    // rãnh nằm tại đầu vách ngắn hơn, không phải trung điểm hai đầu xa.
+    if(localDepth<=widthTol)continue;
+    var mouth={x:capMid.x-u0.x*localDepth,y:capMid.y-u0.y*localDepth};
+    var end={x:capMid.x-u0.x*halfD,y:capMid.y-u0.y*halfD};
+    slots.push({mouth:mouth,end:end});
+  }
+  if(!slots.length)return runs;
+
+  slots.forEach(function(slot){
+    // Exact edge-offset may already preserve this zero-width excursion. Do not
+    // insert it a second time; repair only a contour that actually collapsed it.
+    var already=runs.some(function(run){return run.some(function(p){
+      return Math.hypot(p.x-slot.end.x,p.y-slot.end.y)<=widthTol;
+    });});
+    if(already)return;
+    var bestRun=-1,best=null;
+    runs.forEach(function(run,ri){
+      var hit=projectToRun(run,slot.mouth);
+      if(hit&&(!best||hit.dd<best.dd)){best=hit;bestRun=ri;}
+    });
+    // Điểm vào phải nằm gần miệng rãnh trên outer envelope. Giới hạn này ngăn
+    // ghép nhánh vào một contour khác ở gần đó.
+    if(bestRun<0||!best||best.dd>Math.pow(halfD+widthTol,2))return;
+    var run=runs[bestRun],at=best.seg+1;
+    run.splice(at,0,
+      {x:best.p.x,y:best.p.y,_n2gExactSlot:true},
+      {x:slot.end.x,y:slot.end.y,_n2gExactSlot:true},
+      {x:best.p.x,y:best.p.y,_n2gExactSlot:true});
+  });
+  return runs;
 }
 
 function profileRawCutOutClipperJS(loop,halfD){

@@ -113,6 +113,63 @@ const ordinaryRectangle = polygonEdges([[0,0],[100,0],[100,100],[0,100]],92);
 assert.strictEqual(context.profileHasMicroDetourJS(ordinaryRectangle,6),false,
   'ordinary rectangle must retain the exact CUT_OUT engine');
 
+// A square U-slot exactly as wide as the cutter collapses to zero area in a
+// polygon offset. It must survive as one centreline excursion and return over
+// the same line. A narrower slot must remain blocked.
+function topSquareSlot(width,depth,groupId){
+  const x0=50-width/2,x1=50+width/2;
+  const lp=polygonEdges([[0,0],[100,0],[100,100],[x1,100],[x1,100-depth],
+    [x0,100-depth],[x0,100],[0,100]],groupId);
+  lp._closed=true;return lp;
+}
+const exactDSlot=topSquareSlot(6,20,93);
+const exactDSlotRuns=context.profileOffsetClipper(exactDSlot,3,'cut_out');
+assert(exactDSlotRuns.length>0,'D6 square slot must retain a CUT_OUT run');
+const exactEndIndexes=[];
+exactDSlotRuns[0].forEach((p,i)=>{
+  if(Math.hypot(p.x-50,p.y-83)<0.001)exactEndIndexes.push(i);
+});
+assert(exactEndIndexes.length>=2,'D6 square slot must preserve the in/out centreline');
+const exactSlotEnd=exactEndIndexes[0],slotBefore=exactDSlotRuns[0][exactSlotEnd-1],
+  slotAfter=exactDSlotRuns[0][exactEndIndexes[exactEndIndexes.length-1]+1];
+assert(slotBefore&&slotAfter&&Math.hypot(slotBefore.x-slotAfter.x,slotBefore.y-slotAfter.y)<1e-9,
+  'slot entry and return must overlap exactly');
+const collapsed=context.profileRawCutOutClipperJS(exactDSlot,3);
+const restored=context.profileRestoreExactWidthSlotsJS(exactDSlot,collapsed,3);
+assert.strictEqual(restored[0].filter(p=>p._n2gExactSlot).length,3,
+  'collapsed polygon offset must restore exactly one in/out centreline');
+const cornerSlot=polygonEdges([[0,0],[100,0],[100,100],[53,100],[53,80],
+  [47,80],[47,90],[0,90]],95);
+cornerSlot._closed=true;
+const cornerCollapsed=context.profileRawCutOutClipperJS(cornerSlot,3);
+const cornerRestored=context.profileRestoreExactWidthSlotsJS(cornerSlot,cornerCollapsed,3);
+const cornerBranch=cornerRestored[0].filter(p=>p._n2gExactSlot);
+assert.strictEqual(cornerBranch.length,3,
+  'D6 corner slot with one long wall must retain one in/out centreline');
+assert(Math.abs(cornerBranch[1].x-50)<0.001&&Math.abs(cornerBranch[1].y-83)<0.001,
+  'corner slot centreline must stop one radius before its square bottom');
+const segmentedSlot=polygonEdges([[0,0],[100,0],[100,50],[100,100],[53,100],
+  [53,90],[53,80],[50,80],[47,80],[47,90],[47,100],[0,100]],96);
+segmentedSlot._closed=true;
+const segmentedCollapsed=context.profileRawCutOutClipperJS(segmentedSlot,3);
+const segmentedRestored=context.profileRestoreExactWidthSlotsJS(segmentedSlot,segmentedCollapsed,3);
+assert.strictEqual(segmentedRestored[0].filter(p=>p._n2gExactSlot).length,3,
+  'segmented square walls and bottom must still restore one centreline');
+const radiusDeepSlot=topSquareSlot(6,3,97);
+const radiusDeepCollapsed=context.profileRawCutOutClipperJS(radiusDeepSlot,3);
+const radiusDeepRestored=context.profileRestoreExactWidthSlotsJS(radiusDeepSlot,radiusDeepCollapsed,3);
+const radiusDeepBranch=radiusDeepRestored[0].filter(p=>p._n2gExactSlot);
+assert.strictEqual(radiusDeepBranch.length,3,
+  'slot depth equal to tool radius must travel from outer offset to its mouth and return');
+assert(Math.abs(radiusDeepBranch[1].x-50)<0.001&&Math.abs(radiusDeepBranch[1].y-100)<0.001,
+  'R-deep slot must turn exactly at the mouth without cutting past its bottom');
+assert(Math.abs(Math.hypot(radiusDeepBranch[1].x-radiusDeepBranch[0].x,
+  radiusDeepBranch[1].y-radiusDeepBranch[0].y)-3)<0.001,
+  'R-deep slot centreline excursion must equal the slot depth');
+const narrowDSlotRuns=context.profileOffsetClipper(topSquareSlot(5,20,94),3,'cut_out');
+assert(!narrowDSlotRuns.some(run=>run.some(p=>p._n2gExactSlot)),
+  'slot narrower than D6 must remain blocked');
+
 // Avoid-curve must identify the exact owning segment so Preview can insert the
 // same interior entry point as Ruby instead of snapping to a nearby vertex.
 const entryPath = [{x:0,y:0},{x:100,y:0},{x:100,y:10},{x:0,y:10}];

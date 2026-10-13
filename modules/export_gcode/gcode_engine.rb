@@ -1627,7 +1627,32 @@ module N2G
       end
 
       # Chiều cung: 'G03' (CCW) nếu đi ngược kim đồng hồ quanh tâm, else 'G02' (CW).
+      #
+      # Không chỉ dùng segment đầu tiên: detector có thể mở rộng candidate thêm một
+      # segment ở ranh giới và segment đó đôi khi không đại diện đúng chiều của cả
+      # cung. Khi ấy tâm/bán kính vẫn đúng nhưng G02/G03 bị đảo, khiến controller đi
+      # cung dài gần 360 độ thay vì cung ngắn. Cộng góc có dấu của toàn bộ candidate
+      # giúp quyết định theo chính chuỗi điểm mà preview đang sử dụng.
       def self.arc_dir_gcode(pts, arc)
+        signed_angle = 0.0
+        valid_steps = 0
+        (arc[:s]...arc[:e]).each do |i|
+          a = pts[i]; b = pts[i + 1]
+          ax = a[:x] - arc[:cx]; ay = a[:y] - arc[:cy]
+          bx = b[:x] - arc[:cx]; by = b[:y] - arc[:cy]
+          next if (ax * ax + ay * ay) < 1e-12 || (bx * bx + by * by) < 1e-12
+
+          cross = ax * by - ay * bx
+          dot = ax * bx + ay * by
+          step_angle = Math.atan2(cross, dot)
+          next unless step_angle.finite?
+
+          signed_angle += step_angle
+          valid_steps += 1
+        end
+        return signed_angle > 0 ? 'G03' : 'G02' if valid_steps > 0 && signed_angle.abs > 1e-9
+
+        # Dự phòng cho candidate suy biến; giữ nguyên hành vi cũ.
         a = pts[arc[:s]]; b = pts[arc[:s] + 1]
         rx = a[:x] - arc[:cx]; ry = a[:y] - arc[:cy]
         vx = b[:x] - a[:x];    vy = b[:y] - a[:y]
@@ -3238,7 +3263,8 @@ module N2G
           antiflyout_on = app_settings[:antiflyout] != false
           is_small      = antiflyout_on && is_cutting_layer && [bw_lp, bh_lp].min < threshold && !is_island
 
-          if is_cutting_layer || [bw_lp, bh_lp].min < threshold
+          if ENV['N2G_DEBUG_ANTIFLYOUT'] == '1' &&
+             (is_cutting_layer || [bw_lp, bh_lp].min < threshold)
             path_x = edges.flat_map { |e| [e[:x1], e[:x2]] }
             path_y = edges.flat_map { |e| [e[:y1], e[:y2]] }
             path_w = path_x.empty? ? 0.0 : path_x.max - path_x.min
